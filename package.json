@@ -1,0 +1,15 @@
+{
+  "name": "outreach-system",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev -w @outreach/api",
+    "dev:web": "npm run dev -w @outreach/web",
+    "build": "npm run build -w @outreach/contracts && npm run build -w @outreach/api && npm run build -w @outreach/web",
+    "test": "npm run test -w @outreach/api"
+  }
+}
