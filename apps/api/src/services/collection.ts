@@ -170,6 +170,7 @@ export async function executeCollectionRun(
     campaign.id,
     `Starting run with sources: ${selectedSources.join(", ")} | target leads: ${options.targetLeads}`
   );
+  await logRunEvent(runId, campaign.id, `Per-source target: ${perSourceTarget}`);
 
   const [nicheKeyword] = campaign.niche_keywords;
   const input = {
@@ -182,13 +183,31 @@ export async function executeCollectionRun(
   const sourceTasks: Array<Promise<{ source: SourceName; leads: RawLead[] }>> = [];
 
   if (sources.google) {
-    sourceTasks.push(fetchGoogleLeads(input).then((leads) => ({ source: "google", leads })));
+    sourceTasks.push(
+      (async () => {
+        await logRunEvent(runId, campaign.id, `Fetching leads from google (target ${perSourceTarget})...`);
+        const leads = await fetchGoogleLeads(input);
+        return { source: "google" as const, leads };
+      })()
+    );
   }
   if (sources.yelp) {
-    sourceTasks.push(fetchYelpLeads(input).then((leads) => ({ source: "yelp", leads })));
+    sourceTasks.push(
+      (async () => {
+        await logRunEvent(runId, campaign.id, `Fetching leads from yelp (target ${perSourceTarget})...`);
+        const leads = await fetchYelpLeads(input);
+        return { source: "yelp" as const, leads };
+      })()
+    );
   }
   if (sources.apify) {
-    sourceTasks.push(fetchApifyLeads(input).then((leads) => ({ source: "apify", leads })));
+    sourceTasks.push(
+      (async () => {
+        await logRunEvent(runId, campaign.id, `Fetching leads from apify (target ${perSourceTarget})...`);
+        const leads = await fetchApifyLeads(input);
+        return { source: "apify" as const, leads };
+      })()
+    );
   }
 
   const settled = await Promise.allSettled(sourceTasks);
@@ -225,6 +244,11 @@ export async function executeCollectionRun(
     if (!baseNormalized) {
       counters.rejectedNoEmailCount += 1;
       if (processed % 5 === 0 || processed === cappedRaw.length) {
+        await logRunEvent(
+          runId,
+          campaign.id,
+          `Save progress: ${processed}/${cappedRaw.length} processed | inserted ${counters.insertedCount} | updated ${counters.updatedCount} | rejected ${counters.rejectedNoEmailCount}`
+        );
         await flushRunMetrics(runId, counters, "running");
       }
       continue;
@@ -235,6 +259,11 @@ export async function executeCollectionRun(
     if (!normalized.email) {
       counters.rejectedNoEmailCount += 1;
       if (processed % 5 === 0 || processed === cappedRaw.length) {
+        await logRunEvent(
+          runId,
+          campaign.id,
+          `Save progress: ${processed}/${cappedRaw.length} processed | inserted ${counters.insertedCount} | updated ${counters.updatedCount} | rejected ${counters.rejectedNoEmailCount}`
+        );
         await flushRunMetrics(runId, counters, "running");
       }
       continue;
@@ -290,6 +319,11 @@ export async function executeCollectionRun(
       if (inserted.error) {
         await logRunError(runId, campaign.id, raw.sourceName, inserted.error);
         if (processed % 5 === 0 || processed === cappedRaw.length) {
+          await logRunEvent(
+            runId,
+            campaign.id,
+            `Save progress: ${processed}/${cappedRaw.length} processed | inserted ${counters.insertedCount} | updated ${counters.updatedCount} | rejected ${counters.rejectedNoEmailCount}`
+          );
           await flushRunMetrics(runId, counters, "running");
         }
         continue;
@@ -301,6 +335,11 @@ export async function executeCollectionRun(
 
     if (!leadId) {
       if (processed % 5 === 0 || processed === cappedRaw.length) {
+        await logRunEvent(
+          runId,
+          campaign.id,
+          `Save progress: ${processed}/${cappedRaw.length} processed | inserted ${counters.insertedCount} | updated ${counters.updatedCount} | rejected ${counters.rejectedNoEmailCount}`
+        );
         await flushRunMetrics(runId, counters, "running");
       }
       continue;
@@ -326,6 +365,11 @@ export async function executeCollectionRun(
     });
 
     if (processed % 5 === 0 || processed === cappedRaw.length) {
+      await logRunEvent(
+        runId,
+        campaign.id,
+        `Save progress: ${processed}/${cappedRaw.length} processed | inserted ${counters.insertedCount} | updated ${counters.updatedCount} | rejected ${counters.rejectedNoEmailCount}`
+      );
       await flushRunMetrics(runId, counters, "running");
     }
   }

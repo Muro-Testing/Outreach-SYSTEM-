@@ -56,8 +56,9 @@ export function App() {
   );
 
   const hasActiveFilters = Boolean(filters.q.trim() || filters.location.trim());
+  const runEvents = [...(run?.errors ?? [])].sort((a, b) => a.created_at.localeCompare(b.created_at));
   const latestRunEvent =
-    run?.errors?.find((item) => item.error_message.startsWith("[info]"))?.error_message.replace(/^\[info\]\s*/, "") ?? "";
+    [...runEvents].reverse().find((item) => item.error_message.startsWith("[info]"))?.error_message.replace(/^\[info\]\s*/, "") ?? "";
   const processedCount = (run?.inserted_count ?? 0) + (run?.updated_count ?? 0) + (run?.rejected_no_email_count ?? 0);
   const progressPct = run
     ? run.total_candidates > 0
@@ -347,13 +348,21 @@ export function App() {
                 and Google Maps API restrictions/billing.
               </p>
             ) : null}
-            {(run.errors?.length ?? 0) > 0 ? (
-              <ul className="error-list">
-                {run.errors?.map((item) => (
-                  <li key={`${item.created_at}-${item.source_name}`}>
-                    [{item.source_name}] {item.error_message}
-                  </li>
-                ))}
+            {runEvents.length > 0 ? (
+              <ul className="run-event-list">
+                {runEvents.map((item) => {
+                  const isInfo = item.error_message.startsWith("[info]");
+                  const message = isInfo ? item.error_message.replace(/^\[info\]\s*/, "") : item.error_message;
+
+                  return (
+                    <li
+                      className={isInfo ? "run-event run-event-info" : "run-event run-event-error"}
+                      key={`${item.created_at}-${item.source_name}`}
+                    >
+                      [{item.source_name}] {message}
+                    </li>
+                  );
+                })}
               </ul>
             ) : null}
           </div>

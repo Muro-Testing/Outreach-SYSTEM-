@@ -156,9 +156,22 @@ textarea {
   color: var(--accent-red);
 }
 
-.error-list {
-  margin: 0.6rem 0 0;
+.run-event-list {
+  margin: 0.7rem 0 0;
   padding-left: 1rem;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.run-event {
+  font-size: 0.95rem;
+}
+
+.run-event-info {
+  color: var(--text-soft);
+}
+
+.run-event-error {
   color: var(--accent-red);
 }
 
