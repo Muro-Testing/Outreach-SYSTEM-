@@ -71,3 +71,53 @@ export type CanonicalLead = z.infer<typeof canonicalLeadSchema>;
 export type LeadSourceRecord = z.infer<typeof leadSourceRecordSchema>;
 export type RunSources = z.infer<typeof runSourcesSchema>;
 
+// ── Offers ────────────────────────────────────────────────────────────────────
+
+export const createOfferRequestSchema = z.object({
+  offerName: z.string().min(1),
+  offerSummary: z.string().min(1),
+  targetProblem: z.string().min(1),
+  keyOutcome: z.string().min(1),
+  callToAction: z.string().min(1)
+});
+
+export const offerSchema = z.object({
+  id: z.string().uuid(),
+  offer_name: z.string(),
+  offer_summary: z.string(),
+  target_problem: z.string(),
+  key_outcome: z.string(),
+  call_to_action: z.string(),
+  is_active: z.boolean(),
+  created_at: z.string()
+});
+
+export type CreateOfferRequest = z.infer<typeof createOfferRequestSchema>;
+export type Offer = z.infer<typeof offerSchema>;
+
+// ── Outreach ──────────────────────────────────────────────────────────────────
+
+export const generateOutreachRequestSchema = z.object({
+  campaignId: z.string().uuid(),
+  offerId: z.string().uuid()
+});
+
+export const outreachRowSchema = z.object({
+  lead_id: z.string().uuid(),
+  offer_id: z.string().uuid(),
+  name: z.string(),
+  email: z.string().nullable(),
+  phone: z.string().nullable(),
+  website: z.string().nullable(),
+  location_text: z.string().nullable(),
+  opener_subject: z.string(),
+  opener_body: z.string(),
+  followup1_subject: z.string(),
+  followup1_body: z.string(),
+  followup2_subject: z.string(),
+  followup2_body: z.string()
+});
+
+export type GenerateOutreachRequest = z.infer<typeof generateOutreachRequestSchema>;
+export type OutreachRow = z.infer<typeof outreachRowSchema>;
+
