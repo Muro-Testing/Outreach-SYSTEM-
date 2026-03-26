@@ -2,6 +2,86 @@
 
 Internal lead collection and enrichment system for manual outbound campaign runs.
 
+## Quick Start
+
+If you want to install the app on a new PC, follow this section first.
+
+### 1. Install prerequisites
+
+- Install `Git`
+- Install `Docker Desktop`
+- Start Docker Desktop before running the app
+
+### 2. Download the repo
+
+Option 1: clone with Git
+
+```bash
+git clone https://github.com/Muro-Testing/Outreach-SYSTEM-.git
+cd Outreach-SYSTEM-
+```
+
+Option 2: download ZIP from GitHub
+
+1. Open `https://github.com/Muro-Testing/Outreach-SYSTEM-`
+2. Click `Code`
+3. Click `Download ZIP`
+4. Extract the ZIP
+5. Open a terminal inside the extracted `Outreach-SYSTEM-` folder
+
+### 3. Create Supabase
+
+1. Go to `https://supabase.com`
+2. Create a new project
+3. Open your project settings
+4. Copy:
+   - `Project URL`
+   - `service_role` key
+
+### 4. Create `.env`
+
+Copy `.env.example` to `.env`.
+
+The file must stay in plain `KEY=value` format with no spaces around `=`.
+
+Minimum required values:
+
+```env
+SUPABASE_URL=your_supabase_project_url
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+GOOGLE_MAPS_API_KEY=your_google_maps_api_key
+MISTRAL_API_KEY=your_mistral_api_key
+```
+
+### 5. Run Supabase migrations
+
+Run these SQL files in the Supabase SQL editor in this exact order:
+
+1. `supabase/migrations/20260313_phase1.sql`
+2. `supabase/migrations/202603131510_phase1_enrichment.sql`
+3. `supabase/migrations/20260320_outreach.sql`
+4. `supabase/migrations/20260326_campaign_archive_and_lead_keywords.sql`
+5. `supabase/migrations/20260326_outreach_history.sql`
+6. `supabase/migrations/20260326_outreach_lists.sql`
+7. `supabase/migrations/20260326_query_fingerprint.sql`
+8. `supabase/migrations/20260326_search_queries.sql`
+
+### 6. Start the app
+
+```bash
+docker compose up --build
+```
+
+After startup:
+- Web app: `http://localhost:5173`
+- API health: `http://localhost:8787/health`
+
+### 7. Troubleshooting
+
+- If Docker says the env file is invalid, check that `.env` uses `KEY=value` with no extra spaces.
+- If the web app opens but data does not load, verify `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and the migration order above.
+- If startup fails because a port is busy, free ports `5173` and `8787` or change the mapped ports in `docker-compose.yml`.
+
 Phase 1 focuses on a local-first internal workflow:
 - create a campaign
 - run collection against selected sources
