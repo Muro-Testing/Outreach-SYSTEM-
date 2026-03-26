@@ -249,7 +249,7 @@ async function fetchGoogleTextSearchResults(input: SearchInput): Promise<NonNull
   }
 }
 
-export async function fetchGoogleLeads(input: SearchInput): Promise<RawLead[]> {
+export async function fetchGoogleLeadsForKeyword(input: SearchInput): Promise<RawLead[]> {
   if (!env.googleMapsApiKey) {
     throw new Error("GOOGLE_MAPS_API_KEY is missing.");
   }
@@ -292,3 +292,31 @@ export async function fetchGoogleLeads(input: SearchInput): Promise<RawLead[]> {
 
   return leads;
 }
+
+export async function fetchGoogleLeads(input: SearchInput & { allKeywords?: string[] }): Promise<RawLead[]> {
+  if (!env.googleMapsApiKey) {
+    throw new Error("GOOGLE_MAPS_API_KEY is missing.");
+  }
+
+  const keywords = input.allKeywords && input.allKeywords.length > 0
+    ? input.allKeywords
+    : [input.niche];
+
+  // Run one search per keyword, collecting all place_ids to deduplicate
+  const seenPlaceIds = new Set<string>();
+  const allLeads: RawLead[] = [];
+
+  for (const keyword of keywords) {
+    const keywordInput: SearchInput = { ...input, niche: keyword };
+    const leads = await fetchGoogleLeadsForKeyword(keywordInput);
+    for (const lead of leads) {
+      const id = String(lead.externalId ?? "");
+      if (id && seenPlaceIds.has(id)) continue;
+      if (id) seenPlaceIds.add(id);
+      allLeads.push(lead);
+    }
+  }
+
+  return allLeads;
+}
+

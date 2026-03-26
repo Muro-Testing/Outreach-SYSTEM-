@@ -184,6 +184,7 @@ export async function executeCollectionRun(
   const [nicheKeyword] = campaign.niche_keywords;
   const input = {
     niche: nicheKeyword,
+    allKeywords: campaign.niche_keywords,   // all keywords searched separately, deduped by place_id
     subNiche: campaign.sub_niche,
     location: campaign.location_scope,
     maxResults: perSourceTarget
