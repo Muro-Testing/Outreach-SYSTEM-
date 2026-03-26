@@ -646,9 +646,9 @@ export function App() {
         {/* Ã¢â€â‚¬Ã¢â€â‚¬ Workflow Steps Ã¢â€â‚¬Ã¢â€â‚¬ */}
         <div className="workflow-steps">
           <div className="workflow-step"><div className="step-num">1</div><div className="step-label">Collect Leads</div></div>
-          <div className="step-arrow">?</div>
+          <div className="step-arrow" aria-hidden="true">&rarr;</div>
           <div className="workflow-step"><div className="step-num">2</div><div className="step-label">Build Offer Library</div></div>
-          <div className="step-arrow">?</div>
+          <div className="step-arrow" aria-hidden="true">&rarr;</div>
           <div className="workflow-step"><div className="step-num">3</div><div className="step-label">Generate Outreach</div></div>
         </div>
 
@@ -672,7 +672,7 @@ export function App() {
           </header>
           <form className="campaign-form" onSubmit={onCreateCampaign}>
             <label>Collection keywords<input value={form.nicheKeywords} onChange={e => setForm(p => ({ ...p, nicheKeywords: e.target.value }))} placeholder="e.g. dentist, whitening clinic" /></label>
-            <label>Sub-niche<input value={form.subNiche} onChange={e => setForm(p => ({ ...p, subNiche: e.target.value }))} /></label>
+            <label>Sub-niche (optional)<input value={form.subNiche} onChange={e => setForm(p => ({ ...p, subNiche: e.target.value }))} placeholder="Auto-fills from first keyword if left empty" /></label>
             <label>Location<input value={form.locationScope} onChange={e => setForm(p => ({ ...p, locationScope: e.target.value }))} /></label>
             <button className="btn-primary" disabled={loading} type="submit">+ Create Campaign</button>
           </form>

@@ -5,6 +5,13 @@ import { executeCollectionRun, buildQueryFingerprint } from "../services/collect
 
 export const campaignsRouter = Router();
 
+function resolveCampaignSubNiche(input: { subNiche?: string; nicheKeywords: string[] }) {
+  const explicit = input.subNiche?.trim();
+  if (explicit) return explicit;
+  const fallback = input.nicheKeywords.find((keyword) => keyword.trim().length > 0)?.trim();
+  return fallback ?? "General";
+}
+
 campaignsRouter.get("/", async (req, res) => {
   const parsed = campaignsListQuerySchema.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
@@ -62,12 +69,13 @@ campaignsRouter.get("/:id/latest-run", async (req, res) => {
 campaignsRouter.post("/", async (req, res) => {
   const parsed = createCampaignRequestSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const subNiche = resolveCampaignSubNiche(parsed.data);
 
   const result = await supabase
     .from("campaigns")
     .insert({
       niche_keywords: parsed.data.nicheKeywords,
-      sub_niche: parsed.data.subNiche,
+      sub_niche: subNiche,
       location_scope: parsed.data.locationScope,
       offer_note: "",
       status: "active"

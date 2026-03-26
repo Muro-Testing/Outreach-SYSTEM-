@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const campaignInputSchema = z.object({
   nicheKeywords: z.array(z.string().min(1)).min(1),
-  subNiche: z.string().min(1),
+  subNiche: z.string().trim().optional().default(""),
   locationScope: z.string().min(2)
 });
 
