@@ -28,6 +28,46 @@ export type GeneratedEmails = {
   followup2_body: string;
 };
 
+export type OutreachModelChoice = "default" | "large" | "medium" | "small";
+
+type GenerateLeadOptions = {
+  modelChoice?: OutreachModelChoice;
+};
+
+type GenerateLeadBatchOptions = GenerateLeadOptions & {
+  concurrency?: number;
+};
+
+function resolveOutreachModel(modelChoice?: OutreachModelChoice): string {
+  switch (modelChoice) {
+    case "large":
+      return "mistral-large-latest";
+    case "medium":
+      return "mistral-medium-latest";
+    case "small":
+      return "mistral-small-latest";
+    default:
+      return env.outreachMistralModel;
+  }
+}
+
+export function getOutreachModelLabel(modelChoice?: OutreachModelChoice): string {
+  return resolveOutreachModel(modelChoice);
+}
+
+function resolveOutreachConcurrency(modelChoice?: OutreachModelChoice): number {
+  switch (modelChoice) {
+    case "large":
+      return 3;
+    case "small":
+      return 6;
+    case "medium":
+    case "default":
+    default:
+      return 4;
+  }
+}
+
 function shortName(fullName: string): string {
   return fullName
     .split(/\s*[-–|]\s*/)[0]
@@ -120,12 +160,14 @@ function parseEmailJson(content: string): GeneratedEmails | null {
 
 export async function generateEmailsForLead(
   lead: LeadForOutreach,
-  offer: OfferForOutreach
+  offer: OfferForOutreach,
+  options: GenerateLeadOptions = {}
 ): Promise<GeneratedEmails> {
   if (!env.mistralApiKey) {
     return fallbackEmails(lead, offer);
   }
 
+  const model = resolveOutreachModel(options.modelChoice);
   const biz = shortName(lead.name);
   const desc = shortBizDescription(lead.what_they_do_summary);
   const domain = lead.website ? lead.website.replace(/^https?:\/\/(www\.)?/, "").split("/")[0] : null;
@@ -194,14 +236,20 @@ Return only this JSON:
 }`;
 
   try {
+    const controller = new AbortController();
+    const timeoutMs = Number.isFinite(env.outreachMistralTimeoutMs) && env.outreachMistralTimeoutMs > 0
+      ? env.outreachMistralTimeoutMs
+      : 45000;
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const res = await fetch(`${env.mistralBaseUrl.replace(/\/$/, "")}/v1/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${env.mistralApiKey}`
       },
+      signal: controller.signal,
       body: JSON.stringify({
-        model: env.mistralModel,
+        model,
         temperature: 0.65,
         response_format: { type: "json_object" },
         messages: [
@@ -209,10 +257,10 @@ Return only this JSON:
           { role: "user", content: userPrompt }
         ]
       })
-    });
+    }).finally(() => clearTimeout(timeout));
 
     if (!res.ok) {
-      console.warn(`[outreach] Mistral API error ${res.status} for lead ${lead.id}`);
+      console.warn(`[outreach] Mistral API error ${res.status} for lead ${lead.id} using ${model}`);
       return fallbackEmails(lead, offer);
     }
 
@@ -224,7 +272,7 @@ Return only this JSON:
     const parsed = parseEmailJson(content);
     if (parsed) return parsed;
 
-    console.warn(`[outreach] JSON parse failed for lead ${lead.id}, using fallback. Raw: ${content.slice(0, 200)}`);
+    console.warn(`[outreach] JSON parse failed for lead ${lead.id} using ${model}, using fallback. Raw: ${content.slice(0, 200)}`);
     return fallbackEmails(lead, offer);
   } catch (err) {
     console.warn(`[outreach] Generation error for lead ${lead.id}:`, err);
@@ -235,13 +283,14 @@ Return only this JSON:
 export async function generateEmailsForLeads(
   leads: LeadForOutreach[],
   offer: OfferForOutreach,
-  concurrency = 5
+  options: GenerateLeadBatchOptions = {}
 ): Promise<Array<{ lead: LeadForOutreach; emails: GeneratedEmails }>> {
   const results: Array<{ lead: LeadForOutreach; emails: GeneratedEmails }> = [];
+  const concurrency = options.concurrency ?? resolveOutreachConcurrency(options.modelChoice);
 
   for (let i = 0; i < leads.length; i += concurrency) {
     const batch = leads.slice(i, i + concurrency);
-    const settled = await Promise.allSettled(batch.map((lead) => generateEmailsForLead(lead, offer)));
+    const settled = await Promise.allSettled(batch.map((lead) => generateEmailsForLead(lead, offer, options)));
     for (let j = 0; j < batch.length; j += 1) {
       const result = settled[j];
       results.push({

@@ -867,7 +867,7 @@ tbody tr.row-selected .lead-name-col {
 /* ── Outreach Generator ──────────────────────────────────────────────────────── */
 .outreach-config {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1.1fr) auto minmax(0, 1fr) minmax(180px, 220px) auto;
   align-items: end;
   gap: 1rem;
   background: rgba(66,183,42,0.06);
@@ -883,6 +883,12 @@ tbody tr.row-selected .lead-name-col {
   gap: 0.35rem;
   flex: 1;
   min-width: 200px;
+}
+
+.outreach-config-hint {
+  font-size: 0.76rem;
+  line-height: 1.4;
+  color: var(--text-muted);
 }
 
 .outreach-config-label {
@@ -1002,6 +1008,25 @@ tbody tr.row-selected .lead-name-col {
   font-size: 0.8rem;
   color: var(--text-soft);
   font-weight: 400;
+}
+
+.outreach-delivery-panel {
+  margin: 0.85rem 0 1rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid rgba(24,119,242,0.16);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(231,243,255,0.72), rgba(255,255,255,0.96));
+}
+
+.outreach-delivery-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr) auto auto;
+  gap: 0.85rem;
+  align-items: end;
+}
+
+.outreach-delivery-webhook {
+  min-width: 260px;
 }
 
 /* ── Outreach Table ──────────────────────────────────────────────────────────── */
@@ -1364,6 +1389,7 @@ tbody tr.row-selected:hover { background: #e8eeff !important; }
   .outreach-config-sep { display: none; }
   .outreach-history-head,
   .outreach-history-controls { grid-template-columns: 1fr; display: grid; }
+  .outreach-delivery-grid { grid-template-columns: 1fr; }
   .results-hint {
     margin-left: 0;
     width: 100%;

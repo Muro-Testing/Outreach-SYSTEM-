@@ -1,9 +1,9 @@
 import { Router } from "express";
 import { z } from "zod";
+import * as XLSX from "xlsx";
 import { supabase } from "../db.js";
-import { generateEmailsForLeads } from "../services/outreach.js";
+import { generateEmailsForLeads, getOutreachModelLabel } from "../services/outreach.js";
 import type { LeadForOutreach, OfferForOutreach } from "../services/outreach.js";
-import { env } from "../env.js";
 
 export const outreachRouter = Router();
 
@@ -11,7 +11,8 @@ const generateOutreachRequestSchema = z
   .object({
     campaignId: z.string().uuid().optional(),
     listId: z.string().uuid().optional(),
-    offerId: z.string().uuid()
+    offerId: z.string().uuid(),
+    model: z.enum(["default", "large", "medium", "small"]).optional()
   })
   .refine((data) => Boolean(data.campaignId || data.listId), {
     message: "campaignId or listId required"
@@ -30,6 +31,18 @@ const outreachHistoryListQuerySchema = z.object({
       if (!Number.isFinite(parsed)) return 30;
       return Math.max(1, Math.min(100, Math.floor(parsed)));
     })
+});
+
+const exportWebhookRequestSchema = z.object({
+  webhookUrl: z.string().url().refine((value) => /^https?:\/\//i.test(value), {
+    message: "Webhook URL must start with http:// or https://"
+  }),
+  format: z.enum(["csv", "xlsx"]),
+  fileName: z.string().min(1),
+  mimeType: z.string().min(1),
+  fileBase64: z.string().min(1),
+  generatedCount: z.number().int().nonnegative(),
+  historyId: z.string().uuid().nullable().optional()
 });
 
 type OutreachSource =
@@ -73,6 +86,33 @@ function mapRowsForResponse(rows: Record<string, unknown>[]) {
     followup2_subject: String(row.followup2_subject ?? ""),
     followup2_body: String(row.followup2_body ?? "")
   }));
+}
+
+function buildCsvBuffer(rows: string[][]): Buffer {
+  const csv = rows
+    .map((row) => row.map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`).join(","))
+    .join("\n");
+  return Buffer.from(`\uFEFF${csv}`, "utf8");
+}
+
+function decodeExportFile(input: {
+  format: "csv" | "xlsx";
+  fileBase64: string;
+  fileName: string;
+  mimeType: string;
+}): { buffer: Buffer; fileName: string; mimeType: string } {
+  const buffer = Buffer.from(input.fileBase64, "base64");
+
+  if (input.format === "xlsx") {
+    const workbook = XLSX.read(buffer, { type: "buffer" });
+    const firstSheetName = workbook.SheetNames[0];
+    if (!firstSheetName) throw new Error("The Excel file is empty");
+  } else {
+    const csvText = buffer.toString("utf8");
+    if (!csvText.includes(",")) throw new Error("The CSV file content is invalid");
+  }
+
+  return { buffer, fileName: input.fileName, mimeType: input.mimeType };
 }
 
 async function fetchOffer(offerId: string): Promise<OfferForOutreach | null> {
@@ -170,8 +210,9 @@ outreachRouter.post("/generate", async (req, res) => {
     return res.status(400).json({ error: parsed.error.flatten() });
   }
 
-  const { campaignId, listId, offerId } = parsed.data;
+  const { campaignId, listId, offerId, model } = parsed.data;
   const source = getOutreachSource({ campaignId, listId });
+  const modelVersion = getOutreachModelLabel(model);
 
   const offer = await fetchOffer(offerId);
   if (!offer) {
@@ -189,7 +230,7 @@ outreachRouter.post("/generate", async (req, res) => {
     return res.json({ generated: 0, rows: [], history: null });
   }
 
-  const generated = await generateEmailsForLeads(leads, offer, 5);
+  const generated = await generateEmailsForLeads(leads, offer, { modelChoice: model });
   const now = new Date().toISOString();
 
   const generationInsert = await supabase
@@ -200,7 +241,7 @@ outreachRouter.post("/generate", async (req, res) => {
       list_id: source.listId,
       offer_id: offerId,
       generated_count: generated.length,
-      model_version: env.mistralModel,
+      model_version: modelVersion,
       created_at: now
     })
     .select("id")
@@ -245,7 +286,7 @@ outreachRouter.post("/generate", async (req, res) => {
     followup1_body: emails.followup1_body,
     followup2_subject: emails.followup2_subject,
     followup2_body: emails.followup2_body,
-    model_version: env.mistralModel,
+    model_version: modelVersion,
     generated_at: now,
     updated_at: now
   }));
@@ -281,6 +322,45 @@ outreachRouter.post("/generate", async (req, res) => {
     rows,
     history: historySummary ?? null
   });
+});
+
+outreachRouter.post("/export-webhook", async (req, res) => {
+  const parsed = exportWebhookRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+
+  const { webhookUrl, format, fileBase64, fileName, mimeType, generatedCount, historyId } = parsed.data;
+
+  let decoded: { buffer: Buffer; fileName: string; mimeType: string };
+  try {
+    decoded = decodeExportFile({ format, fileBase64, fileName, mimeType });
+  } catch (error) {
+    return res.status(400).json({ error: error instanceof Error ? error.message : "Invalid export file" });
+  }
+
+  const form = new FormData();
+  form.append("file", new Blob([new Uint8Array(decoded.buffer)], { type: decoded.mimeType }), decoded.fileName);
+  form.append("format", format);
+  form.append("generatedCount", String(generatedCount));
+  if (historyId) form.append("historyId", historyId);
+  form.append("source", "outreach-system");
+
+  try {
+    const response = await fetch(webhookUrl, {
+      method: "POST",
+      body: form
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      return res.status(502).json({ error: body || `Webhook returned ${response.status}` });
+    }
+
+    return res.json({ ok: true, status: response.status });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : "Failed to send webhook" });
+  }
 });
 
 outreachRouter.get("/history", async (req, res) => {

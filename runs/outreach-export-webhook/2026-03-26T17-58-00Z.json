@@ -1,0 +1,24 @@
+{
+  "task": "outreach-export-webhook",
+  "timestamp": "2026-03-26T17:58:00Z",
+  "inputs": {
+    "build": true,
+    "dockerComposeRebuild": true,
+    "webhookSmoke": {
+      "route": "/api/outreach/export-webhook",
+      "format": "csv",
+      "destination": "https://httpbin.org/post",
+      "usesDummyData": true
+    }
+  },
+  "processed": {
+    "buildPassed": true,
+    "dockerUp": true,
+    "webhookResponse": {
+      "ok": true,
+      "status": 200
+    }
+  },
+  "success": true,
+  "errors": []
+}

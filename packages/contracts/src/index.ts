@@ -117,7 +117,8 @@ export const generateOutreachRequestSchema = z
   .object({
     campaignId: z.string().uuid().optional(),
     listId: z.string().uuid().optional(),
-    offerId: z.string().uuid()
+    offerId: z.string().uuid(),
+    model: z.enum(["default", "large", "medium", "small"]).optional()
   })
   .refine((d) => d.campaignId || d.listId, { message: "campaignId or listId required" });
 

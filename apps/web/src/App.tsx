@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import * as XLSX from "xlsx";
 import { api } from "./lib/api";
 
 // Ã¢â€â‚¬Ã¢â€â‚¬ Types Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -42,6 +43,8 @@ type ModalEmail = {
   followup1_subject: string; followup1_body: string;
   followup2_subject: string; followup2_body: string;
 };
+type OutreachModelOption = "default" | "large" | "medium" | "small";
+type OutreachExportFormat = "csv" | "xlsx";
 type KeywordMatch = { keyword: string; resultsCount: number; searchedAt: string; runId: string; campaignId: string };
 type DuplicateWarning =
   | { duplicateType: "campaign"; existingRunId: string; existingCampaignId: string; leadCount: number; completedAt: string }
@@ -114,6 +117,10 @@ export function App() {
   const [outreachCampaignId, setOutreachCampaignId] = useState("");
   const [outreachListId, setOutreachListId] = useState("");
   const [outreachSourceMode, setOutreachSourceMode] = useState<"campaign" | "list">("campaign");
+  const [outreachModel, setOutreachModel] = useState<OutreachModelOption>("default");
+  const [outreachExportFormat, setOutreachExportFormat] = useState<OutreachExportFormat>("csv");
+  const [outreachWebhookUrl, setOutreachWebhookUrl] = useState("");
+  const [sendingOutreachWebhook, setSendingOutreachWebhook] = useState(false);
   const [outreachHistory, setOutreachHistory] = useState<OutreachHistorySummary[]>([]);
   const [outreachHistoryLoaded, setOutreachHistoryLoaded] = useState(false);
   const [selectedOutreachHistoryId, setSelectedOutreachHistoryId] = useState("");
@@ -268,6 +275,11 @@ export function App() {
     function onKey(e: KeyboardEvent) { if (e.key === "Escape") { setModalEmail(null); setShowListModal(false); setDuplicateWarning(null); } }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  useEffect(() => {
+    const savedWebhookUrl = window.localStorage.getItem("outreach:webhook-url");
+    if (savedWebhookUrl) setOutreachWebhookUrl(savedWebhookUrl);
   }, []);
 
   useEffect(() => {
@@ -471,8 +483,8 @@ export function App() {
   // Ã¢â€â‚¬Ã¢â€â‚¬ Handlers: Outreach Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   async function onGenerateOutreach() {
     const payload = outreachSourceMode === "campaign"
-      ? { campaignId: outreachCampaignId, offerId: selectedOfferId }
-      : { listId: outreachListId, offerId: selectedOfferId };
+      ? { campaignId: outreachCampaignId, offerId: selectedOfferId, model: outreachModel }
+      : { listId: outreachListId, offerId: selectedOfferId, model: outreachModel };
     setGeneratingOutreach(true); setOutreachError(""); setOutreachRows([]);
     try {
       const result = await api<{ generated: number; rows: OutreachRow[]; history: OutreachHistorySummary | null }>("/api/outreach/generate", {
@@ -484,7 +496,13 @@ export function App() {
         window.localStorage.setItem("outreach:last-history-id", result.history.id);
       }
       await loadOutreachHistory();
-    } catch (err) { setOutreachError(err instanceof Error ? err.message : "Generation failed"); }
+    } catch (err) {
+      if (err instanceof Error && "status" in err && (err as Error & { status?: number }).status === 504) {
+        setOutreachError("Outreach generation timed out at the gateway. Try the Medium or Small model, or generate against a smaller lead set.");
+      } else {
+        setOutreachError(err instanceof Error ? err.message : "Generation failed");
+      }
+    }
     finally { setGeneratingOutreach(false); }
   }
 
@@ -497,6 +515,61 @@ export function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = filename;
     document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+  }
+  function downloadBlob(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+  function getOutreachExportHeaders() {
+    return ["Name", "Email", "Phone", "Website", "Location", "Opener Subject", "Opener Body", "Follow-up 1 Subject", "Follow-up 1 Body", "Follow-up 2 Subject", "Follow-up 2 Body"];
+  }
+  function getOutreachExportRows() {
+    return outreachRows.map(r => [
+      r.name,
+      r.email?.endsWith("@pending.local") ? "" : r.email,
+      r.phone ?? "",
+      r.website ?? "",
+      r.location_text ?? "",
+      r.opener_subject,
+      r.opener_body,
+      r.followup1_subject,
+      r.followup1_body,
+      r.followup2_subject,
+      r.followup2_body
+    ]);
+  }
+  function getOutreachExportBaseName() {
+    const slug = (selectedOffer?.offer_name ?? selectedOutreachHistory?.offer_name ?? "outreach").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+    const created = selectedOutreachHistory?.created_at.slice(0, 10) ?? today();
+    return `outreach-${slug}-${created}`;
+  }
+  function buildOutreachCsvBlob() {
+    const rows = [getOutreachExportHeaders(), ...getOutreachExportRows()];
+    const csv = rows.map(r => r.map(v => csvCell(v)).join(",")).join("\n");
+    return new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8;" });
+  }
+  function buildOutreachXlsxBlob() {
+    const worksheet = XLSX.utils.aoa_to_sheet([getOutreachExportHeaders(), ...getOutreachExportRows()]);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Outreach");
+    const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+    return new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  }
+  async function blobToBase64(blob: Blob) {
+    const arrayBuffer = await blob.arrayBuffer();
+    let binary = "";
+    const bytes = new Uint8Array(arrayBuffer);
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
   }
   function onExportLeads() {
     if (!leads.length) { setError("No leads to export."); return; }
@@ -518,11 +591,44 @@ export function App() {
   }
   function onExportOutreach() {
     if (!outreachRows.length) { setOutreachError("No rows to export."); return; }
-    const headers = ["Name", "Email", "Phone", "Website", "Location", "Opener Subject", "Opener Body", "Follow-up 1 Subject", "Follow-up 1 Body", "Follow-up 2 Subject", "Follow-up 2 Body"];
-    const slug = (selectedOffer?.offer_name ?? selectedOutreachHistory?.offer_name ?? "outreach").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
-    const created = selectedOutreachHistory?.created_at.slice(0, 10) ?? today();
-    downloadCsv([headers, ...outreachRows.map(r => [r.name, r.email?.endsWith("@pending.local") ? "" : r.email, r.phone ?? "", r.website ?? "", r.location_text ?? "", r.opener_subject, r.opener_body, r.followup1_subject, r.followup1_body, r.followup2_subject, r.followup2_body])],
-      `outreach-${slug}-${created}.csv`);
+    const fileBaseName = getOutreachExportBaseName();
+    if (outreachExportFormat === "xlsx") {
+      downloadBlob(buildOutreachXlsxBlob(), `${fileBaseName}.xlsx`);
+      return;
+    }
+    downloadBlob(buildOutreachCsvBlob(), `${fileBaseName}.csv`);
+  }
+  async function onSendOutreachWebhook() {
+    if (!outreachRows.length) { setOutreachError("No rows to send."); return; }
+    if (!outreachWebhookUrl.trim()) { setOutreachError("Enter a webhook URL first."); return; }
+    setSendingOutreachWebhook(true);
+    setOutreachError("");
+    try {
+      const fileBaseName = getOutreachExportBaseName();
+      const blob = outreachExportFormat === "xlsx" ? buildOutreachXlsxBlob() : buildOutreachCsvBlob();
+      const fileName = `${fileBaseName}.${outreachExportFormat}`;
+      const mimeType = outreachExportFormat === "xlsx"
+        ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        : "text/csv;charset=utf-8;";
+      const fileBase64 = await blobToBase64(blob);
+      await api<{ ok: true; status: number }>("/api/outreach/export-webhook", {
+        method: "POST",
+        body: JSON.stringify({
+          webhookUrl: outreachWebhookUrl.trim(),
+          format: outreachExportFormat,
+          fileName,
+          mimeType,
+          fileBase64,
+          generatedCount: outreachRows.length,
+          historyId: selectedOutreachHistoryId || null
+        })
+      });
+      window.localStorage.setItem("outreach:webhook-url", outreachWebhookUrl.trim());
+    } catch (err) {
+      setOutreachError(err instanceof Error ? err.message : "Failed to send webhook");
+    } finally {
+      setSendingOutreachWebhook(false);
+    }
   }
 
   function compactList(items: string[], limit = 1) {
@@ -1142,7 +1248,7 @@ export function App() {
             </div>
             {outreachRows.length > 0 && (
               <button className="btn-green" type="button" onClick={onExportOutreach}>
-                Export CSV ({outreachRows.length} rows)
+                Export {outreachExportFormat === "xlsx" ? "Excel" : "CSV"} ({outreachRows.length} rows)
               </button>
             )}
           </div>
@@ -1182,6 +1288,16 @@ export function App() {
                 <option value="">Choose offer</option>
                 {offers.map(o => <option value={o.id} key={o.id}>{o.offer_name}</option>)}
               </select>
+            </div>
+            <div className="outreach-config-item">
+              <div className="outreach-config-label">AI model</div>
+              <select className="outreach-select" value={outreachModel} onChange={e => setOutreachModel(e.target.value as OutreachModelOption)}>
+                <option value="default">Default (Medium)</option>
+                <option value="large">Mistral Large</option>
+                <option value="medium">Mistral Medium</option>
+                <option value="small">Mistral Small</option>
+              </select>
+              <div className="outreach-config-hint">Medium keeps quality high with better speed. Large is slower on bigger lead sets.</div>
             </div>
             <button className="btn-generate" type="button" disabled={!canGenerate} onClick={() => void onGenerateOutreach()}>
               {generatingOutreach ? <><span className="spinner" /> Generating...</> : "Generate Emails"}
@@ -1267,7 +1383,7 @@ export function App() {
               <span className="spinner spinner-lg" />
               <div>
                 <strong>Generating personalised emails...</strong>
-                <p>Writing opener + 2 follow-ups for each lead. This may take a moment for large lists.</p>
+                <p>Writing opener + 2 follow-ups for each lead using the selected model. This may take longer for Large and bigger lists.</p>
               </div>
             </div>
           )}
@@ -1280,6 +1396,32 @@ export function App() {
                 <span className="results-count">{outreachRows.length}</span>
                 leads with personalised emails ready.
                 <span className="results-hint">Click any row to preview all 3 emails.</span>
+              </div>
+              <div className="outreach-delivery-panel">
+                <div className="outreach-delivery-grid">
+                  <label>
+                    Export format
+                    <select value={outreachExportFormat} onChange={e => setOutreachExportFormat(e.target.value as OutreachExportFormat)}>
+                      <option value="csv">CSV (Google Sheets)</option>
+                      <option value="xlsx">Excel (.xlsx)</option>
+                    </select>
+                  </label>
+                  <label className="outreach-delivery-webhook">
+                    Webhook URL
+                    <input
+                      value={outreachWebhookUrl}
+                      onChange={e => setOutreachWebhookUrl(e.target.value)}
+                      placeholder="https://your-automation.example/webhook"
+                    />
+                  </label>
+                  <button className="btn-clear" type="button" onClick={onExportOutreach}>
+                    Download {outreachExportFormat === "xlsx" ? "Excel" : "CSV"}
+                  </button>
+                  <button className="btn-purple" type="button" disabled={!outreachWebhookUrl.trim() || sendingOutreachWebhook} onClick={() => void onSendOutreachWebhook()}>
+                    {sendingOutreachWebhook ? "Sending..." : `Send ${outreachExportFormat === "xlsx" ? "Excel" : "CSV"} to webhook`}
+                  </button>
+                </div>
+                <p className="run-hint">CSV opens cleanly in Google Sheets. Excel keeps a native `.xlsx` file. Webhook delivery sends the generated file as multipart form-data.</p>
               </div>
               <div className="outreach-mobile-list">
                 {outreachRows.map(row => (

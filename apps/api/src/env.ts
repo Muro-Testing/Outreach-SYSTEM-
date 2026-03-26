@@ -39,5 +39,7 @@ export const env = {
   tavilyApiKey: process.env.TAVILY_API_KEY ?? "",
   mistralApiKey: process.env.MISTRAL_API_KEY ?? "",
   mistralBaseUrl: process.env.MISTRAL_BASE_URL ?? "https://api.mistral.ai",
-  mistralModel: process.env.MISTRAL_MODEL ?? "mistral-small-latest"
+  mistralModel: process.env.MISTRAL_MODEL ?? "mistral-small-latest",
+  outreachMistralModel: process.env.MISTRAL_OUTREACH_MODEL ?? process.env.MISTRAL_MODEL ?? "mistral-medium-latest",
+  outreachMistralTimeoutMs: Number(process.env.OUTREACH_MISTRAL_TIMEOUT_MS ?? 45000)
 };

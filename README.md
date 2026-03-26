@@ -218,6 +218,8 @@ Other supported integration keys:
 - `MISTRAL_API_KEY`
 - `MISTRAL_BASE_URL`
 - `MISTRAL_MODEL`
+- `MISTRAL_OUTREACH_MODEL`
+- `OUTREACH_MISTRAL_TIMEOUT_MS`
 
 Runtime configuration:
 - `PORT` default `8787`
