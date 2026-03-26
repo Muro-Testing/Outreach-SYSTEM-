@@ -6,7 +6,16 @@ import { crawlWebsiteForContactData } from "./crawler.js";
 import { normalizeBusinessEmail } from "./email.js";
 import { normalizeRawLead, payloadHash } from "./normalize.js";
 import { enrichBusinessFromWebsite } from "./enrich.js";
+import { expandKeywordsWithAI } from "./keyword-expander.js";
 import type { NormalizedLead, RawLead, RunCounters, SourceName } from "../types.js";
+
+// Estimated fraction of raw Google candidates that yield a confirmed email after crawling.
+// Used to pre-calculate how many keywords/candidates we need upfront.
+const EMAIL_YIELD_RATE = 0.38;
+// Maximum extra Google keywords AI can generate per run.
+const MAX_AI_KEYWORDS = 15;
+// Each Google keyword returns at most this many unique results (3 pages × 20).
+const GOOGLE_MAX_PER_KEYWORD = 60;
 
 export function buildQueryFingerprint(keywords: string[], location: string): string {
   const sorted = [...keywords].map(k => k.toLowerCase().trim()).sort().join("|");
@@ -152,6 +161,90 @@ async function enrichAndPersistLead(runId: string, campaignId: string, input: En
   }
 }
 
+// ── Search query logger ────────────────────────────────────────────────────────
+async function logSearchQuery(
+  runId: string,
+  campaignId: string,
+  fingerprint: string,
+  keyword: string,
+  location: string,
+  resultsCount: number,
+  aiGenerated: boolean
+): Promise<void> {
+  await supabase.from("search_queries").insert({
+    run_id: runId,
+    campaign_id: campaignId,
+    campaign_fingerprint: fingerprint,
+    keyword,
+    location,
+    results_count: resultsCount,
+    ai_generated: aiGenerated
+  });
+}
+
+// ── Lead upsert helper ─────────────────────────────────────────────────────────
+async function upsertLead(
+  runId: string,
+  campaign: CampaignRow,
+  raw: RawLead,
+  counters: RunCounters
+): Promise<EnrichmentJob | null> {
+  const baseNormalized = normalizeRawLead(raw);
+  if (!baseNormalized) { counters.rejectedNoEmailCount += 1; return null; }
+
+  const normalized = await hydrateMissingEmail(baseNormalized);
+  if (!normalized.email) { counters.rejectedNoEmailCount += 1; return null; }
+
+  const normalizedEmail = normalized.email;
+  let leadId: string | null = null;
+
+  if (normalized.websiteDomain) {
+    const existing = await supabase
+      .from("leads").select("id,email")
+      .eq("website_domain", normalized.websiteDomain).maybeSingle();
+
+    if (existing.data?.id) {
+      counters.dedupedCount += 1;
+      counters.updatedCount += 1;
+      leadId = existing.data.id;
+      await supabase.from("leads").update({
+        email: normalizedEmail, name: normalized.name,
+        what_they_do_summary: normalized.whatTheyDoSummary,
+        location_text: normalized.locationText, phone: normalized.phone,
+        website: normalized.website, last_run_id: runId
+      }).eq("id", leadId);
+    }
+  }
+
+  if (!leadId) {
+    const inserted = await supabase.from("leads").insert({
+      campaign_id: campaign.id, last_run_id: runId, name: normalized.name,
+      email: normalizedEmail, what_they_do_summary: normalized.whatTheyDoSummary,
+      location_text: normalized.locationText, phone: normalized.phone,
+      website: normalized.website, website_domain: normalized.websiteDomain
+    }).select("id").single();
+
+    if (inserted.error || !inserted.data) { return null; }
+    leadId = inserted.data.id;
+    counters.insertedCount += 1;
+  }
+
+  if (!leadId) return null;
+
+  await supabase.from("lead_sources").insert({
+    lead_id: leadId, campaign_id: campaign.id, run_id: runId,
+    source_name: raw.sourceName, external_id: raw.externalId ?? null,
+    external_url: raw.externalUrl ?? null,
+    raw_payload_hash: payloadHash(raw.raw), raw_payload: raw.raw
+  });
+
+  return {
+    leadId, name: normalized.name, email: normalizedEmail,
+    website: normalized.website, whatTheyDoSummary: normalized.whatTheyDoSummary
+  };
+}
+
+// ── Main collection runner ─────────────────────────────────────────────────────
 export async function executeCollectionRun(
   runId: string,
   campaign: CampaignRow,
@@ -159,65 +252,83 @@ export async function executeCollectionRun(
   options: { targetLeads: number }
 ): Promise<void> {
   const counters = emptyCounters();
+  const targetEmails = Math.max(1, options.targetLeads);
 
-  await supabase
-    .from("collection_runs")
+  await supabase.from("collection_runs")
     .update({ status: "running", started_at: new Date().toISOString() })
     .eq("id", runId);
 
   const fingerprint = buildQueryFingerprint(campaign.niche_keywords, campaign.location_scope);
   await supabase.from("collection_runs").update({ query_fingerprint: fingerprint }).eq("id", runId);
 
-  const selectedSources = Object.entries(sources)
-    .filter(([, enabled]) => enabled)
-    .map(([name]) => name);
-  const selectedSourceCount = Math.max(1, selectedSources.length);
-  const perSourceTarget = Math.max(1, Math.ceil(options.targetLeads / selectedSourceCount));
+  const selectedSources = Object.entries(sources).filter(([, e]) => e).map(([n]) => n);
+  await logRunEvent(runId, campaign.id,
+    `Sources: ${selectedSources.join(", ")} | target email-verified leads: ${targetEmails}`);
 
-  await logRunEvent(
-    runId,
-    campaign.id,
-    `Starting run with sources: ${selectedSources.join(", ")} | target leads: ${options.targetLeads}`
-  );
-  await logRunEvent(runId, campaign.id, `Per-source target: ${perSourceTarget}`);
-
-  const [nicheKeyword] = campaign.niche_keywords;
-  const input = {
-    niche: nicheKeyword,
-    allKeywords: campaign.niche_keywords,   // all keywords searched separately, deduped by place_id
-    subNiche: campaign.sub_niche,
-    location: campaign.location_scope,
-    maxResults: perSourceTarget
-  };
-
-  const sourceTasks: Array<Promise<{ source: SourceName; leads: RawLead[] }>> = [];
+  // ── Step 1: Calculate how many Google keywords are needed ──────────────────
+  // To get targetEmails confirmed emails we need (target / yield_rate) raw candidates.
+  // Each keyword gives at most GOOGLE_MAX_PER_KEYWORD results.
+  let allKeywords = [...campaign.niche_keywords];
 
   if (sources.google) {
-    sourceTasks.push(
-      (async () => {
-        await logRunEvent(runId, campaign.id, `Fetching leads from google (target ${perSourceTarget})...`);
-        const leads = await fetchGoogleLeads(input);
-        return { source: "google" as const, leads };
-      })()
-    );
+    const rawCandidatesNeeded = Math.ceil(targetEmails / EMAIL_YIELD_RATE);
+    const keywordsNeeded = Math.ceil(rawCandidatesNeeded / GOOGLE_MAX_PER_KEYWORD);
+    const aiKeywordsNeeded = Math.max(0, keywordsNeeded - allKeywords.length);
+
+    if (aiKeywordsNeeded > 0) {
+      const capped = Math.min(aiKeywordsNeeded, MAX_AI_KEYWORDS);
+      await logRunEvent(runId, campaign.id,
+        `Need ~${rawCandidatesNeeded} raw candidates for ${targetEmails} email target. ` +
+        `${allKeywords.length} keyword(s) provided → generating ${capped} more with AI...`);
+
+      const expanded = await expandKeywordsWithAI(allKeywords, campaign.location_scope, capped);
+      if (expanded.length > 0) {
+        await logRunEvent(runId, campaign.id,
+          `AI added ${expanded.length} keyword(s): ${expanded.map(k => `"${k}"`).join(", ")}`);
+        allKeywords = [...allKeywords, ...expanded];
+      } else {
+        await logRunEvent(runId, campaign.id, "AI keyword expansion returned no results — using original keywords only.");
+      }
+    }
+
+    await logRunEvent(runId, campaign.id,
+      `Searching Google with ${allKeywords.length} keyword(s): ${allKeywords.map(k => `"${k}"`).join(", ")}`);
+  }
+
+  // ── Step 2: Fetch raw candidates from all sources ──────────────────────────
+  const sourceTasks: Array<Promise<{ source: SourceName; leads: RawLead[]; keywords?: string[] }>> = [];
+
+  if (sources.google) {
+    sourceTasks.push((async () => {
+      const leads = await fetchGoogleLeads({
+        niche: allKeywords[0],
+        allKeywords,
+        subNiche: campaign.sub_niche,
+        location: campaign.location_scope,
+        maxResults: GOOGLE_MAX_PER_KEYWORD
+      });
+      return { source: "google" as const, leads, keywords: allKeywords };
+    })());
   }
   if (sources.yelp) {
-    sourceTasks.push(
-      (async () => {
-        await logRunEvent(runId, campaign.id, `Fetching leads from yelp (target ${perSourceTarget})...`);
-        const leads = await fetchYelpLeads(input);
-        return { source: "yelp" as const, leads };
-      })()
-    );
+    sourceTasks.push((async () => {
+      await logRunEvent(runId, campaign.id, "Fetching leads from Yelp...");
+      const leads = await fetchYelpLeads({
+        niche: allKeywords[0],
+        location: campaign.location_scope, maxResults: targetEmails
+      });
+      return { source: "yelp" as const, leads };
+    })());
   }
   if (sources.apify) {
-    sourceTasks.push(
-      (async () => {
-        await logRunEvent(runId, campaign.id, `Fetching leads from apify (target ${perSourceTarget})...`);
-        const leads = await fetchApifyLeads(input);
-        return { source: "apify" as const, leads };
-      })()
-    );
+    sourceTasks.push((async () => {
+      await logRunEvent(runId, campaign.id, "Fetching leads from Apify...");
+      const leads = await fetchApifyLeads({
+        niche: allKeywords[0],
+        location: campaign.location_scope, maxResults: targetEmails
+      });
+      return { source: "apify" as const, leads };
+    })());
   }
 
   const settled = await Promise.allSettled(sourceTasks);
@@ -226,172 +337,84 @@ export async function executeCollectionRun(
   for (const result of settled) {
     if (result.status === "fulfilled") {
       allRaw.push(...result.value.leads);
-      await logRunEvent(runId, campaign.id, `Fetched ${result.value.leads.length} leads from ${result.value.source}.`);
+      await logRunEvent(runId, campaign.id,
+        `Fetched ${result.value.leads.length} candidates from ${result.value.source}.`);
+
+      // Log each keyword searched to search_queries table
+      if (result.value.source === "google" && result.value.keywords) {
+        const perKeyword = Math.ceil(result.value.leads.length / result.value.keywords.length);
+        const origSet = new Set(campaign.niche_keywords.map(k => k.toLowerCase().trim()));
+        for (const kw of result.value.keywords) {
+          await logSearchQuery(runId, campaign.id, fingerprint, kw,
+            campaign.location_scope, perKeyword,
+            !origSet.has(kw.toLowerCase().trim()));
+        }
+      } else {
+        await logSearchQuery(runId, campaign.id, fingerprint, allKeywords[0],
+          campaign.location_scope, result.value.leads.length, false);
+      }
     } else {
       await logRunError(runId, campaign.id, "pipeline", result.reason);
     }
   }
 
-  const cappedRaw = allRaw.slice(0, Math.max(1, options.targetLeads));
-  counters.totalCandidates = cappedRaw.length;
+  counters.totalCandidates = allRaw.length;
   await flushRunMetrics(runId, counters, "running");
 
   if (counters.totalCandidates === 0) {
-    await logRunEvent(runId, campaign.id, "No candidates returned. Check source toggles, keys, and query.");
+    await logRunEvent(runId, campaign.id, "No candidates returned. Check source toggles, API keys, and keywords.");
     await flushRunMetrics(runId, counters, "completed");
     return;
   }
 
-  await logRunEvent(runId, campaign.id, `Normalizing and upserting ${counters.totalCandidates} leads...`);
+  await logRunEvent(runId, campaign.id,
+    `${counters.totalCandidates} unique candidates. ` +
+    `Processing for emails (stop at ${targetEmails} confirmed)...`);
 
+  // ── Step 3: Upsert leads — stop as soon as email target is reached ─────────
   const enrichmentJobs: EnrichmentJob[] = [];
+  let emailCount = 0;
   let processed = 0;
 
-  for (const raw of cappedRaw) {
+  for (const raw of allRaw) {
+    // Early stop: we already have enough email-verified leads
+    if (emailCount >= targetEmails) break;
+
     processed += 1;
+    const job = await upsertLead(runId, campaign, raw, counters);
 
-    const baseNormalized = normalizeRawLead(raw);
-    if (!baseNormalized) {
-      counters.rejectedNoEmailCount += 1;
-      if (processed % 5 === 0 || processed === cappedRaw.length) {
-        await logRunEvent(
-          runId,
-          campaign.id,
-          `Save progress: ${processed}/${cappedRaw.length} processed | inserted ${counters.insertedCount} | updated ${counters.updatedCount} | rejected ${counters.rejectedNoEmailCount}`
-        );
-        await flushRunMetrics(runId, counters, "running");
-      }
-      continue;
+    if (job) {
+      enrichmentJobs.push(job);
+      emailCount += 1;
     }
 
-    const normalized = await hydrateMissingEmail(baseNormalized);
-
-    if (!normalized.email) {
-      counters.rejectedNoEmailCount += 1;
-      if (processed % 5 === 0 || processed === cappedRaw.length) {
-        await logRunEvent(
-          runId,
-          campaign.id,
-          `Save progress: ${processed}/${cappedRaw.length} processed | inserted ${counters.insertedCount} | updated ${counters.updatedCount} | rejected ${counters.rejectedNoEmailCount}`
-        );
-        await flushRunMetrics(runId, counters, "running");
-      }
-      continue;
-    }
-
-    const normalizedEmail = normalized.email;
-    let leadId: string | null = null;
-
-    if (normalized.websiteDomain) {
-      const existing = await supabase
-        .from("leads")
-        .select("id,email")
-        .eq("website_domain", normalized.websiteDomain)
-        .maybeSingle();
-
-      if (existing.data?.id) {
-        counters.dedupedCount += 1;
-        counters.updatedCount += 1;
-        leadId = existing.data.id;
-
-        await supabase
-          .from("leads")
-          .update({
-            email: normalizedEmail,
-            name: normalized.name,
-            what_they_do_summary: normalized.whatTheyDoSummary,
-            location_text: normalized.locationText,
-            phone: normalized.phone,
-            website: normalized.website,
-            last_run_id: runId
-          })
-          .eq("id", leadId);
-      }
-    }
-
-    if (!leadId) {
-      const inserted = await supabase
-        .from("leads")
-        .insert({
-          campaign_id: campaign.id,
-          last_run_id: runId,
-          name: normalized.name,
-          email: normalizedEmail,
-          what_they_do_summary: normalized.whatTheyDoSummary,
-          location_text: normalized.locationText,
-          phone: normalized.phone,
-          website: normalized.website,
-          website_domain: normalized.websiteDomain
-        })
-        .select("id")
-        .single();
-
-      if (inserted.error) {
-        await logRunError(runId, campaign.id, raw.sourceName, inserted.error);
-        if (processed % 5 === 0 || processed === cappedRaw.length) {
-          await logRunEvent(
-            runId,
-            campaign.id,
-            `Save progress: ${processed}/${cappedRaw.length} processed | inserted ${counters.insertedCount} | updated ${counters.updatedCount} | rejected ${counters.rejectedNoEmailCount}`
-          );
-          await flushRunMetrics(runId, counters, "running");
-        }
-        continue;
-      }
-
-      leadId = inserted.data.id;
-      counters.insertedCount += 1;
-    }
-
-    if (!leadId) {
-      if (processed % 5 === 0 || processed === cappedRaw.length) {
-        await logRunEvent(
-          runId,
-          campaign.id,
-          `Save progress: ${processed}/${cappedRaw.length} processed | inserted ${counters.insertedCount} | updated ${counters.updatedCount} | rejected ${counters.rejectedNoEmailCount}`
-        );
-        await flushRunMetrics(runId, counters, "running");
-      }
-      continue;
-    }
-
-    await supabase.from("lead_sources").insert({
-      lead_id: leadId,
-      campaign_id: campaign.id,
-      run_id: runId,
-      source_name: raw.sourceName,
-      external_id: raw.externalId ?? null,
-      external_url: raw.externalUrl ?? null,
-      raw_payload_hash: payloadHash(raw.raw),
-      raw_payload: raw.raw
-    });
-
-    enrichmentJobs.push({
-      leadId,
-      name: normalized.name,
-      email: normalizedEmail,
-      website: normalized.website,
-      whatTheyDoSummary: normalized.whatTheyDoSummary
-    });
-
-    if (processed % 5 === 0 || processed === cappedRaw.length) {
-      await logRunEvent(
-        runId,
-        campaign.id,
-        `Save progress: ${processed}/${cappedRaw.length} processed | inserted ${counters.insertedCount} | updated ${counters.updatedCount} | rejected ${counters.rejectedNoEmailCount}`
-      );
+    if (processed % 5 === 0 || processed === allRaw.length) {
+      await logRunEvent(runId, campaign.id,
+        `Progress: ${processed}/${allRaw.length} checked | ${emailCount}/${targetEmails} email-verified`);
       await flushRunMetrics(runId, counters, "running");
     }
   }
 
-  await logRunEvent(runId, campaign.id, `Starting enrichment on ${enrichmentJobs.length} leads (parallel x6)...`);
+  if (emailCount < targetEmails) {
+    await logRunEvent(runId, campaign.id,
+      `Note: reached ${emailCount}/${targetEmails} email-verified leads. ` +
+      `Try adding more keywords or enabling additional sources.`);
+  } else {
+    await logRunEvent(runId, campaign.id,
+      `Target reached: ${emailCount} email-verified leads saved.`);
+  }
+
+  // ── Step 4: Enrich leads (AI summary + extra email discovery) ─────────────
+  await logRunEvent(runId, campaign.id,
+    `Starting enrichment on ${enrichmentJobs.length} leads (parallel x6)...`);
 
   let enrichedCount = 0;
   await mapLimit(enrichmentJobs, 6, async (job) => {
     await enrichAndPersistLead(runId, campaign.id, job);
     enrichedCount += 1;
     if (enrichedCount % 5 === 0 || enrichedCount === enrichmentJobs.length) {
-      await logRunEvent(runId, campaign.id, `Enrichment progress: ${enrichedCount}/${enrichmentJobs.length}`);
+      await logRunEvent(runId, campaign.id,
+        `Enrichment: ${enrichedCount}/${enrichmentJobs.length}`);
     }
   });
 
