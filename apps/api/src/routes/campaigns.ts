@@ -87,6 +87,8 @@ campaignsRouter.post("/:id/run", async (req, res) => {
   const force = Boolean(runBody.data.force);
   if (!force) {
     const fingerprint = buildQueryFingerprint(campaign.data.niche_keywords, campaign.data.location_scope);
+
+    // ── Campaign-level check: exact same keyword set + location ───────────────
     const existing = await supabase
       .from("collection_runs")
       .select("id, campaign_id, inserted_count, updated_count, completed_at")
@@ -100,10 +102,46 @@ campaignsRouter.post("/:id/run", async (req, res) => {
       const leadCount = (existing.data.inserted_count ?? 0) + (existing.data.updated_count ?? 0);
       return res.status(409).json({
         duplicate: true,
+        duplicateType: "campaign",
         existingRunId: existing.data.id,
         existingCampaignId: existing.data.campaign_id,
         leadCount,
         completedAt: existing.data.completed_at
+      });
+    }
+
+    // ── Per-keyword check: any keyword from this campaign already searched ────
+    const normalizedLocation = campaign.data.location_scope.toLowerCase().trim();
+    const normalizedKeywords = campaign.data.niche_keywords.map((k: string) => k.toLowerCase().trim());
+
+    const kwCheck = await supabase
+      .from("search_queries")
+      .select("keyword, location, results_count, created_at, run_id, campaign_id")
+      .in("keyword", normalizedKeywords)
+      .eq("location", normalizedLocation)
+      .order("created_at", { ascending: false })
+      .limit(50);
+
+    if (!kwCheck.error && kwCheck.data && kwCheck.data.length > 0) {
+      // Build unique keyword → most recent match map
+      const seen = new Map<string, typeof kwCheck.data[0]>();
+      for (const row of kwCheck.data) {
+        const k = row.keyword.toLowerCase().trim();
+        if (!seen.has(k)) seen.set(k, row);
+      }
+
+      const keywordMatches = Array.from(seen.values()).map(row => ({
+        keyword: row.keyword,
+        resultsCount: row.results_count,
+        searchedAt: row.created_at,
+        runId: row.run_id,
+        campaignId: row.campaign_id
+      }));
+
+      return res.status(409).json({
+        duplicate: true,
+        duplicateType: "keyword",
+        keywordMatches
       });
     }
   }

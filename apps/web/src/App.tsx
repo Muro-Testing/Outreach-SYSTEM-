@@ -32,9 +32,10 @@ type ModalEmail = {
   followup1_subject: string; followup1_body: string;
   followup2_subject: string; followup2_body: string;
 };
-type DuplicateWarning = {
-  existingRunId: string; existingCampaignId: string; leadCount: number; completedAt: string;
-};
+type KeywordMatch = { keyword: string; resultsCount: number; searchedAt: string; runId: string; campaignId: string };
+type DuplicateWarning =
+  | { duplicateType: "campaign"; existingRunId: string; existingCampaignId: string; leadCount: number; completedAt: string }
+  | { duplicateType: "keyword"; keywordMatches: KeywordMatch[] };
 type OfferFields = {
   offerName: string; offerSummary: string; targetProblem: string;
   keyOutcome: string; callToAction: string;
@@ -191,14 +192,13 @@ export function App() {
       });
       setRun(createdRun);
     } catch (err: unknown) {
-      // 409 = duplicate search warning
-      if (err instanceof Error && err.message.startsWith("{")) {
-        try {
-          const payload = JSON.parse(err.message) as DuplicateWarning & { duplicate: boolean };
-          if (payload.duplicate) { setDuplicateWarning(payload); setLoading(false); return; }
-        } catch { /* not json */ }
+      // 409 = duplicate search warning — body is attached to err.body by api()
+      const apiErr = err as Error & { status?: number; body?: Record<string, unknown> };
+      if (apiErr.status === 409 && apiErr.body?.duplicate) {
+        setDuplicateWarning(apiErr.body as unknown as DuplicateWarning);
+        setLoading(false);
+        return;
       }
-      // api() throws Error(body.error) so check for duplicate flag another way
       setError(err instanceof Error ? err.message : "Run failed");
     }
     finally { setLoading(false); }
@@ -345,27 +345,50 @@ export function App() {
         <div className="modal-backdrop" onClick={() => setDuplicateWarning(null)}>
           <div className="modal modal-warning" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>Search already run</h3>
+              <h3>Keywords already searched</h3>
               <button className="modal-close" onClick={() => setDuplicateWarning(null)}>✕</button>
             </div>
             <div className="modal-body" style={{ gap: "1rem" }}>
-              <div className="dupe-info-box">
-                <div className="dupe-icon">⚡</div>
-                <div>
-                  <strong>This exact search was already completed</strong>
-                  <p>It returned <strong>{duplicateWarning.leadCount} leads</strong> on {new Date(duplicateWarning.completedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}.</p>
-                  <p>Running again would spend API credits on the same query with no new results.</p>
+              {duplicateWarning.duplicateType === "campaign" ? (
+                <div className="dupe-info-box">
+                  <div className="dupe-icon">⚡</div>
+                  <div>
+                    <strong>This exact search was already completed</strong>
+                    <p>It returned <strong>{duplicateWarning.leadCount} leads</strong> on {new Date(duplicateWarning.completedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}.</p>
+                    <p>Running again would spend API credits on the same query with no new results.</p>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="dupe-info-box">
+                  <div className="dupe-icon">🔍</div>
+                  <div>
+                    <strong>Some keywords were already searched in this location</strong>
+                    <p>These keywords already have results saved — running again may not find new leads:</p>
+                    <ul className="dupe-keyword-list">
+                      {duplicateWarning.keywordMatches.map(m => (
+                        <li key={m.keyword}>
+                          <span className="dupe-kw-tag">"{m.keyword}"</span>
+                          — {m.resultsCount} leads found on {new Date(m.searchedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )}
               <div className="dupe-actions">
-                <button className="btn-accent" onClick={() => {
-                  setSelectedCampaignId(duplicateWarning.existingCampaignId);
-                  setDuplicateWarning(null);
-                }}>
-                  View existing leads
-                </button>
+                {duplicateWarning.duplicateType === "campaign" && (
+                  <button className="btn-accent" onClick={() => {
+                    setSelectedCampaignId(duplicateWarning.existingCampaignId);
+                    setDuplicateWarning(null);
+                  }}>
+                    View existing leads
+                  </button>
+                )}
                 <button className="btn-clear" onClick={() => { void onRunCampaign(true); setDuplicateWarning(null); }}>
                   Run fresh anyway
+                </button>
+                <button className="btn-ghost" onClick={() => setDuplicateWarning(null)}>
+                  Cancel
                 </button>
               </div>
             </div>

@@ -368,18 +368,14 @@ export async function executeCollectionRun(
   }
 
   await logRunEvent(runId, campaign.id,
-    `${counters.totalCandidates} unique candidates. ` +
-    `Processing for emails (stop at ${targetEmails} confirmed)...`);
+    `${counters.totalCandidates} unique candidates. Crawling all for emails...`);
 
-  // ── Step 3: Upsert leads — stop as soon as email target is reached ─────────
+  // ── Step 3: Upsert all leads — crawl every candidate for maximum emails ────
   const enrichmentJobs: EnrichmentJob[] = [];
   let emailCount = 0;
   let processed = 0;
 
   for (const raw of allRaw) {
-    // Early stop: we already have enough email-verified leads
-    if (emailCount >= targetEmails) break;
-
     processed += 1;
     const job = await upsertLead(runId, campaign, raw, counters);
 
@@ -390,19 +386,17 @@ export async function executeCollectionRun(
 
     if (processed % 5 === 0 || processed === allRaw.length) {
       await logRunEvent(runId, campaign.id,
-        `Progress: ${processed}/${allRaw.length} checked | ${emailCount}/${targetEmails} email-verified`);
+        `Progress: ${processed}/${allRaw.length} crawled | ${emailCount} emails found so far`);
       await flushRunMetrics(runId, counters, "running");
     }
   }
 
-  if (emailCount < targetEmails) {
-    await logRunEvent(runId, campaign.id,
-      `Note: reached ${emailCount}/${targetEmails} email-verified leads. ` +
-      `Try adding more keywords or enabling additional sources.`);
-  } else {
-    await logRunEvent(runId, campaign.id,
-      `Target reached: ${emailCount} email-verified leads saved.`);
-  }
+  await logRunEvent(runId, campaign.id,
+    `Crawl complete: ${emailCount} email-verified leads from ${counters.totalCandidates} candidates` +
+    (emailCount < targetEmails
+      ? ` (target was ${targetEmails} — try more keywords or sources for next run)`
+      : ` ✓ target of ${targetEmails} reached`)
+  );
 
   // ── Step 4: Enrich leads (AI summary + extra email discovery) ─────────────
   await logRunEvent(runId, campaign.id,
