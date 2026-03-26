@@ -73,6 +73,7 @@ describe("google adapter", () => {
     expect(leads).toHaveLength(1);
     expect(leads[0]).toMatchObject({
       sourceName: "google",
+      matchedKeyword: "dentist",
       externalId: "place-1",
       name: "Bright Dental",
       locationText: "1 High Street, London, UK"
@@ -130,6 +131,7 @@ describe("google adapter", () => {
     expect(String(fetchMock.mock.calls[1][0])).toContain("/maps/api/place/textsearch/json?");
     expect(leads).toHaveLength(1);
     expect(leads[0]).toMatchObject({
+      matchedKeyword: "dentist",
       externalId: "place-2",
       name: "Smile Studio"
     });

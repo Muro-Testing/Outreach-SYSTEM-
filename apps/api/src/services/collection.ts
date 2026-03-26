@@ -233,6 +233,7 @@ async function upsertLead(
 
   await supabase.from("lead_sources").insert({
     lead_id: leadId, campaign_id: campaign.id, run_id: runId,
+    matched_keyword: raw.matchedKeyword ?? null,
     source_name: raw.sourceName, external_id: raw.externalId ?? null,
     external_url: raw.externalUrl ?? null,
     raw_payload_hash: payloadHash(raw.raw), raw_payload: raw.raw

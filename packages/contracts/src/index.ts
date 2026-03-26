@@ -3,8 +3,7 @@ import { z } from "zod";
 export const campaignInputSchema = z.object({
   nicheKeywords: z.array(z.string().min(1)).min(1),
   subNiche: z.string().min(1),
-  locationScope: z.string().min(2),
-  offerNote: z.string().min(1)
+  locationScope: z.string().min(2)
 });
 
 export const runStatusSchema = z.enum(["queued", "running", "completed", "failed"]);
@@ -38,10 +37,18 @@ export const leadSourceRecordSchema = z.object({
   campaignId: z.string().uuid(),
   runId: z.string().uuid(),
   sourceName: z.enum(["google", "yelp", "apify"]),
+  matchedKeyword: z.string().nullable().optional(),
   externalId: z.string().nullable(),
   externalUrl: z.string().nullable(),
   rawPayloadHash: z.string(),
   createdAt: z.string()
+});
+
+export const campaignsListQuerySchema = z.object({
+  includeArchived: z
+    .union([z.boolean(), z.enum(["true", "false"])])
+    .optional()
+    .transform((value) => value === true || value === "true")
 });
 
 export const createCampaignRequestSchema = campaignInputSchema;
@@ -61,8 +68,14 @@ export const runCampaignRequestSchema = z.object({
 export const listLeadsQuerySchema = z.object({
   campaignId: z.string().uuid().optional(),
   runId: z.string().uuid().optional(),
+  keyword: z.string().optional(),
   q: z.string().optional(),
-  location: z.string().optional()
+  location: z.string().optional(),
+  sourceName: z.enum(["google", "yelp", "apify"]).optional(),
+  includeArchivedCampaigns: z
+    .union([z.boolean(), z.enum(["true", "false"])])
+    .optional()
+    .transform((value) => value === undefined ? undefined : value === true || value === "true")
 });
 
 export type CampaignInput = z.infer<typeof campaignInputSchema>;
@@ -122,8 +135,28 @@ export const outreachRowSchema = z.object({
   followup2_body: z.string()
 });
 
+export const outreachHistorySummarySchema = z.object({
+  id: z.string().uuid(),
+  source_type: z.enum(["campaign", "list"]),
+  campaign_id: z.string().uuid().nullable(),
+  list_id: z.string().uuid().nullable(),
+  offer_id: z.string().uuid(),
+  generated_count: z.number().int().nonnegative(),
+  model_version: z.string(),
+  created_at: z.string(),
+  offer_name: z.string(),
+  campaign_name: z.string().nullable(),
+  list_name: z.string().nullable()
+});
+
+export const outreachHistoryDetailSchema = outreachHistorySummarySchema.extend({
+  rows: z.array(outreachRowSchema)
+});
+
 export type GenerateOutreachRequest = z.infer<typeof generateOutreachRequestSchema>;
 export type OutreachRow = z.infer<typeof outreachRowSchema>;
+export type OutreachHistorySummary = z.infer<typeof outreachHistorySummarySchema>;
+export type OutreachHistoryDetail = z.infer<typeof outreachHistoryDetailSchema>;
 
 // ── Outreach Lists ─────────────────────────────────────────────────────────────
 

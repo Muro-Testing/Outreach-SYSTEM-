@@ -2,6 +2,7 @@ export type SourceName = "google" | "yelp" | "apify";
 
 export type RawLead = {
   sourceName: SourceName;
+  matchedKeyword?: string | null;
   externalId?: string;
   externalUrl?: string;
   name: string;

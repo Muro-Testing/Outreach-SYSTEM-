@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api } from "./lib/api";
 
-// ── Types ──────────────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ Types Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 type Campaign = {
   id: string; niche_keywords: string[]; sub_niche: string;
   location_scope: string; offer_note: string; status: string; created_at: string;
@@ -12,9 +12,13 @@ type Run = {
   deduped_count: number; rejected_no_email_count: number;
   errors?: Array<{ error_message: string; source_name: string; created_at: string }>;
 };
+type LeadCampaign = {
+  id: string; sub_niche: string; location_scope: string; status: string;
+};
 type Lead = {
   id: string; name: string; email: string | null; what_they_do_summary: string | null;
   location_text: string | null; phone: string | null; website: string | null;
+  matched_keywords: string[]; source_names: string[]; campaigns: LeadCampaign[];
 };
 type Offer = {
   id: string; offer_name: string; offer_summary: string; target_problem: string;
@@ -27,6 +31,12 @@ type OutreachRow = {
   opener_subject: string; opener_body: string; followup1_subject: string;
   followup1_body: string; followup2_subject: string; followup2_body: string;
 };
+type OutreachHistorySummary = {
+  id: string; source_type: "campaign" | "list"; campaign_id: string | null; list_id: string | null;
+  offer_id: string; generated_count: number; model_version: string; created_at: string;
+  offer_name: string; campaign_name: string | null; list_name: string | null;
+};
+type OutreachHistoryDetail = OutreachHistorySummary & { rows: OutreachRow[] };
 type ModalEmail = {
   name: string; opener_subject: string; opener_body: string;
   followup1_subject: string; followup1_body: string;
@@ -42,31 +52,32 @@ type OfferFields = {
 };
 
 export function App() {
-  // ── Collection state ─────────────────────────────────────────────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Collection state Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
   const [run, setRun] = useState<Run | null>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [filters, setFilters] = useState({ q: "", location: "" });
+  const [leadViewMode, setLeadViewMode] = useState<"all" | "campaign">("all");
+  const [filters, setFilters] = useState({ campaignId: "", keyword: "", q: "", location: "", sourceName: "" });
   const [sources, setSources] = useState({ google: true, yelp: false, apify: false });
   const [targetLeads, setTargetLeads] = useState(30);
   const [expandedSummaries, setExpandedSummaries] = useState<Record<string, boolean>>({});
   const [form, setForm] = useState({
     nicheKeywords: "dentist, dental clinic", subNiche: "cosmetic dentistry",
-    locationScope: "London, UK", offerNote: "Performance-focused website and lead generation service."
+    locationScope: "London, UK"
   });
   const [duplicateWarning, setDuplicateWarning] = useState<DuplicateWarning | null>(null);
 
-  // ── Lead selection state ──────────────────────────────────────────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Lead selection state Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
   const [showListModal, setShowListModal] = useState(false);
   const [newListName, setNewListName] = useState("");
   const [listModalLoading, setListModalLoading] = useState(false);
   const [listModalError, setListModalError] = useState("");
 
-  // ── Offers state ─────────────────────────────────────────────────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Offers state Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const [offers, setOffers] = useState<Offer[]>([]);
   const [selectedOfferId, setSelectedOfferId] = useState("");
   const [offerForm, setOfferForm] = useState<OfferFields>({
@@ -78,47 +89,95 @@ export function App() {
   const [offerMode, setOfferMode] = useState<"manual" | "ai">("manual");
   const [aiIdeaText, setAiIdeaText] = useState("");
   const [aiDrafting, setAiDrafting] = useState(false);
-  const [aiRefined, setAiRefined] = useState(false); // true after first AI draft — shows refine row
+  const [aiRefined, setAiRefined] = useState(false); // true after first AI draft Ã¢â‚¬â€ shows refine row
   const [refinementNote, setRefinementNote] = useState("");
   const [aiRefining, setAiRefining] = useState(false);
 
-  // ── Outreach Lists state ──────────────────────────────────────────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Outreach Lists state Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const [outreachLists, setOutreachLists] = useState<OutreachList[]>([]);
 
-  // ── Outreach generation state ─────────────────────────────────────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Outreach generation state Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const [outreachRows, setOutreachRows] = useState<OutreachRow[]>([]);
   const [generatingOutreach, setGeneratingOutreach] = useState(false);
   const [outreachError, setOutreachError] = useState("");
   const [outreachCampaignId, setOutreachCampaignId] = useState("");
   const [outreachListId, setOutreachListId] = useState("");
   const [outreachSourceMode, setOutreachSourceMode] = useState<"campaign" | "list">("campaign");
+  const [outreachHistory, setOutreachHistory] = useState<OutreachHistorySummary[]>([]);
+  const [outreachHistoryLoaded, setOutreachHistoryLoaded] = useState(false);
+  const [selectedOutreachHistoryId, setSelectedOutreachHistoryId] = useState("");
+  const [loadingOutreachHistory, setLoadingOutreachHistory] = useState(false);
+  const [historyRestored, setHistoryRestored] = useState(false);
   const [modalEmail, setModalEmail] = useState<ModalEmail | null>(null);
 
-  // ── Derived ──────────────────────────────────────────────────────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Derived Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const selectedCampaign = useMemo(() => campaigns.find(c => c.id === selectedCampaignId) ?? null, [campaigns, selectedCampaignId]);
   const selectedOffer = useMemo(() => offers.find(o => o.id === selectedOfferId) ?? null, [offers, selectedOfferId]);
   const outreachCampaign = useMemo(() => campaigns.find(c => c.id === outreachCampaignId) ?? null, [campaigns, outreachCampaignId]);
   const outreachList = useMemo(() => outreachLists.find(l => l.id === outreachListId) ?? null, [outreachLists, outreachListId]);
-  const hasActiveFilters = Boolean(filters.q.trim() || filters.location.trim());
+  const selectedOutreachHistory = useMemo(
+    () => outreachHistory.find((entry) => entry.id === selectedOutreachHistoryId) ?? null,
+    [outreachHistory, selectedOutreachHistoryId]
+  );
+  const visibleCampaignFilterId = leadViewMode === "campaign" ? selectedCampaignId : filters.campaignId;
+  const hasActiveFilters = Boolean(
+    filters.campaignId.trim() || filters.keyword.trim() || filters.q.trim() || filters.location.trim() || filters.sourceName.trim()
+  );
   const allLeadsSelected = leads.length > 0 && leads.every(l => selectedLeadIds.has(l.id));
   const someLeadsSelected = selectedLeadIds.size > 0;
+  const keywordOptions = useMemo(
+    () => [...new Set(leads.flatMap((lead) => lead.matched_keywords))].sort((a, b) => a.localeCompare(b)),
+    [leads]
+  );
+  const campaignFilterOptions = useMemo(() => {
+    const seen = new Map<string, LeadCampaign>();
+    for (const lead of leads) {
+      for (const campaign of lead.campaigns) {
+        if (!seen.has(campaign.id)) seen.set(campaign.id, campaign);
+      }
+    }
+    return [...seen.values()].sort((a, b) => `${a.sub_niche} ${a.location_scope}`.localeCompare(`${b.sub_niche} ${b.location_scope}`));
+  }, [leads]);
+  const orderedOutreachHistory = useMemo(() => {
+    const score = (entry: OutreachHistorySummary) => {
+      let points = 0;
+      if (selectedOfferId && entry.offer_id === selectedOfferId) points += 4;
+      if (outreachSourceMode === "campaign" && outreachCampaignId && entry.campaign_id === outreachCampaignId) points += 3;
+      if (outreachSourceMode === "list" && outreachListId && entry.list_id === outreachListId) points += 3;
+      if (entry.source_type === outreachSourceMode) points += 1;
+      return points;
+    };
+    return [...outreachHistory].sort((a, b) => {
+      const diff = score(b) - score(a);
+      if (diff !== 0) return diff;
+      return b.created_at.localeCompare(a.created_at);
+    });
+  }, [outreachHistory, outreachSourceMode, outreachCampaignId, outreachListId, selectedOfferId]);
 
   const runEvents = [...(run?.errors ?? [])].sort((a, b) => a.created_at.localeCompare(b.created_at));
   const latestRunEvent = [...runEvents].reverse().find(e => e.error_message.startsWith("[info]"))?.error_message.replace(/^\[info\]\s*/, "") ?? "";
   const processedCount = (run?.inserted_count ?? 0) + (run?.updated_count ?? 0) + (run?.rejected_no_email_count ?? 0);
   const progressPct = run ? (run.total_candidates > 0 ? Math.min(100, Math.round((processedCount / run.total_candidates) * 100)) : run.status === "completed" ? 100 : 0) : 0;
 
-  // ── Data loaders ──────────────────────────────────────────────────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Data loaders Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   async function loadCampaigns() {
     const data = await api<Campaign[]>("/api/campaigns");
     setCampaigns(data);
-    if (!selectedCampaignId && data[0]) setSelectedCampaignId(data[0].id);
+    if (!data.length) {
+      setSelectedCampaignId("");
+      return;
+    }
+    if (!selectedCampaignId || !data.some((campaign) => campaign.id === selectedCampaignId)) {
+      setSelectedCampaignId(data[0].id);
+    }
   }
   async function loadLeads() {
     const params = new URLSearchParams();
-    if (selectedCampaignId) params.set("campaignId", selectedCampaignId);
+    if (visibleCampaignFilterId) params.set("campaignId", visibleCampaignFilterId);
+    if (filters.keyword) params.set("keyword", filters.keyword);
     if (filters.q) params.set("q", filters.q);
     if (filters.location) params.set("location", filters.location);
+    if (filters.sourceName) params.set("sourceName", filters.sourceName);
     const data = await api<Lead[]>(`/api/leads?${params.toString()}`);
     setLeads(data);
   }
@@ -135,20 +194,55 @@ export function App() {
     const data = await api<OutreachList[]>("/api/outreach-lists");
     setOutreachLists(data);
   }
+  async function loadOutreachHistory() {
+    try {
+      const data = await api<OutreachHistorySummary[]>("/api/outreach/history?limit=50");
+      setOutreachHistory(data);
+    } finally {
+      setOutreachHistoryLoaded(true);
+    }
+  }
+  async function loadOutreachHistoryEntry(historyId: string) {
+    if (!historyId) return;
+    setLoadingOutreachHistory(true);
+    setOutreachError("");
+    try {
+      const data = await api<OutreachHistoryDetail>(`/api/outreach/history/${historyId}`);
+      setSelectedOutreachHistoryId(data.id);
+      setOutreachRows(data.rows);
+      setSelectedOfferId(data.offer_id);
+      if (data.source_type === "campaign") {
+        setOutreachSourceMode("campaign");
+        setOutreachCampaignId(data.campaign_id ?? "");
+      } else {
+        setOutreachSourceMode("list");
+        setOutreachListId(data.list_id ?? "");
+      }
+      window.localStorage.setItem("outreach:last-history-id", data.id);
+    } catch (err) {
+      setOutreachError(err instanceof Error ? err.message : "Failed to load saved outreach");
+    } finally {
+      setLoadingOutreachHistory(false);
+    }
+  }
 
-  // ── Effects ───────────────────────────────────────────────────────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Effects Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   useEffect(() => {
     void loadCampaigns().catch(err => setError((err as Error).message));
     void loadOffers().catch(() => undefined);
     void loadOutreachLists().catch(() => undefined);
+    void loadOutreachHistory().catch(() => undefined);
   }, []);
 
   useEffect(() => {
     if (!selectedCampaignId) { setRun(null); return; }
-    void loadLeads().catch(err => setError((err as Error).message));
     void loadLatestRun(selectedCampaignId).catch(err => setError((err as Error).message));
+  }, [selectedCampaignId]);
+
+  useEffect(() => {
+    void loadLeads().catch(err => setError((err as Error).message));
     setSelectedLeadIds(new Set());
-  }, [selectedCampaignId, filters.q, filters.location]);
+  }, [selectedCampaignId, leadViewMode, filters.campaignId, filters.keyword, filters.q, filters.location, filters.sourceName]);
 
   useEffect(() => {
     if (!run || (run.status !== "queued" && run.status !== "running")) return;
@@ -165,7 +259,23 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // ── Handlers: Collection ──────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!outreachHistoryLoaded) return;
+    if (historyRestored) return;
+    if (outreachHistory.length === 0) {
+      setHistoryRestored(true);
+      return;
+    }
+    const lastHistoryId = window.localStorage.getItem("outreach:last-history-id");
+    if (!lastHistoryId || !outreachHistory.some((entry) => entry.id === lastHistoryId)) {
+      setHistoryRestored(true);
+      return;
+    }
+    setHistoryRestored(true);
+    void loadOutreachHistoryEntry(lastHistoryId);
+  }, [historyRestored, outreachHistory, outreachHistoryLoaded]);
+
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Handlers: Collection Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   async function onCreateCampaign(e: FormEvent) {
     e.preventDefault(); setLoading(true); setError("");
     try {
@@ -173,7 +283,7 @@ export function App() {
         method: "POST",
         body: JSON.stringify({
           nicheKeywords: form.nicheKeywords.split(",").map(v => v.trim()).filter(Boolean),
-          subNiche: form.subNiche, locationScope: form.locationScope, offerNote: form.offerNote
+          subNiche: form.subNiche, locationScope: form.locationScope
         })
       });
       await loadCampaigns();
@@ -192,7 +302,7 @@ export function App() {
       });
       setRun(createdRun);
     } catch (err: unknown) {
-      // 409 = duplicate search warning — body is attached to err.body by api()
+      // 409 = duplicate search warning Ã¢â‚¬â€ body is attached to err.body by api()
       const apiErr = err as Error & { status?: number; body?: Record<string, unknown> };
       if (apiErr.status === 409 && apiErr.body?.duplicate) {
         setDuplicateWarning(apiErr.body as unknown as DuplicateWarning);
@@ -204,13 +314,36 @@ export function App() {
     finally { setLoading(false); }
   }
 
-  // ── Handlers: Lead selection ──────────────────────────────────────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Handlers: Lead selection Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   function toggleLead(id: string) {
     setSelectedLeadIds(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
   }
   function toggleAllLeads() {
     if (allLeadsSelected) setSelectedLeadIds(new Set());
     else setSelectedLeadIds(new Set(leads.map(l => l.id)));
+  }
+
+  async function onArchiveCampaign() {
+    if (!selectedCampaignId) return;
+    const confirmed = window.confirm("Archive this campaign? Its leads and run history will stay available in All Leads.");
+    if (!confirmed) return;
+
+    setLoading(true);
+    setError("");
+    try {
+      await api(`/api/campaigns/${selectedCampaignId}/archive`, { method: "PATCH" });
+      setLeadViewMode("all");
+      if (filters.campaignId === selectedCampaignId) {
+        setFilters((current) => ({ ...current, campaignId: "" }));
+      }
+      await loadCampaigns();
+      await loadLeads();
+      setRun(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to archive campaign");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function onAddToExistingList(listId: string) {
@@ -247,7 +380,7 @@ export function App() {
     } catch { /* ignore */ }
   }
 
-  // ── Handlers: Offers ──────────────────────────────────────────────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Handlers: Offers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   async function onSaveOffer(e: FormEvent) {
     e.preventDefault(); setOfferLoading(true); setOfferError("");
     try {
@@ -296,22 +429,27 @@ export function App() {
     finally { setAiRefining(false); }
   }
 
-  // ── Handlers: Outreach ────────────────────────────────────────────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Handlers: Outreach Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   async function onGenerateOutreach() {
     const payload = outreachSourceMode === "campaign"
       ? { campaignId: outreachCampaignId, offerId: selectedOfferId }
       : { listId: outreachListId, offerId: selectedOfferId };
     setGeneratingOutreach(true); setOutreachError(""); setOutreachRows([]);
     try {
-      const result = await api<{ generated: number; rows: OutreachRow[] }>("/api/outreach/generate", {
+      const result = await api<{ generated: number; rows: OutreachRow[]; history: OutreachHistorySummary | null }>("/api/outreach/generate", {
         method: "POST", body: JSON.stringify(payload)
       });
       setOutreachRows(result.rows);
+      if (result.history) {
+        setSelectedOutreachHistoryId(result.history.id);
+        window.localStorage.setItem("outreach:last-history-id", result.history.id);
+      }
+      await loadOutreachHistory();
     } catch (err) { setOutreachError(err instanceof Error ? err.message : "Generation failed"); }
     finally { setGeneratingOutreach(false); }
   }
 
-  // ── Export helpers ────────────────────────────────────────────────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Export helpers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   function csvCell(v: string | null | undefined) { return `"${String(v ?? "").replace(/"/g, '""')}"`; }
   function today() { return new Date().toISOString().slice(0, 10); }
   function downloadCsv(rows: (string | null | undefined)[][], filename: string) {
@@ -323,35 +461,71 @@ export function App() {
   }
   function onExportLeads() {
     if (!leads.length) { setError("No leads to export."); return; }
-    const headers = ["Name", "Email", "What they do", "Location", "Phone", "Website"];
-    downloadCsv([headers, ...leads.map(l => [l.name, l.email?.endsWith("@pending.local") ? "" : l.email, l.what_they_do_summary ?? "", l.location_text ?? "", l.phone ?? "", l.website ?? ""])],
-      `${(selectedCampaign?.sub_niche ?? "leads").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${today()}.csv`);
+    const headers = ["Name", "Email", "What they do", "Keywords", "Campaigns", "Location", "Phone", "Website"];
+    const slugBase = leadViewMode === "campaign"
+      ? (selectedCampaign?.sub_niche ?? "campaign-leads")
+      : "all-leads";
+    downloadCsv([headers, ...leads.map(l => [
+      l.name,
+      l.email?.endsWith("@pending.local") ? "" : l.email,
+      l.what_they_do_summary ?? "",
+      l.matched_keywords.join(" | "),
+      l.campaigns.map((campaign) => `${campaign.sub_niche} - ${campaign.location_scope}`).join(" | "),
+      l.location_text ?? "",
+      l.phone ?? "",
+      l.website ?? ""
+    ])],
+      `${slugBase.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${today()}.csv`);
   }
   function onExportOutreach() {
     if (!outreachRows.length) { setOutreachError("No rows to export."); return; }
     const headers = ["Name", "Email", "Phone", "Website", "Location", "Opener Subject", "Opener Body", "Follow-up 1 Subject", "Follow-up 1 Body", "Follow-up 2 Subject", "Follow-up 2 Body"];
-    const slug = (selectedOffer?.offer_name ?? "outreach").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+    const slug = (selectedOffer?.offer_name ?? selectedOutreachHistory?.offer_name ?? "outreach").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+    const created = selectedOutreachHistory?.created_at.slice(0, 10) ?? today();
     downloadCsv([headers, ...outreachRows.map(r => [r.name, r.email?.endsWith("@pending.local") ? "" : r.email, r.phone ?? "", r.website ?? "", r.location_text ?? "", r.opener_subject, r.opener_body, r.followup1_subject, r.followup1_body, r.followup2_subject, r.followup2_body])],
-      `outreach-${slug}-${today()}.csv`);
+      `outreach-${slug}-${created}.csv`);
+  }
+
+  function compactList(items: string[], limit = 1) {
+    if (!items.length) return "-";
+    if (items.length <= limit) return items.join(", ");
+    return `${items.slice(0, limit).join(", ")} +${items.length - limit}`;
   }
 
   const canGenerate = selectedOfferId && (outreachSourceMode === "campaign" ? !!outreachCampaignId : !!outreachListId) && !generatingOutreach;
 
-  // ── Render ────────────────────────────────────────────────────────────────────
+  function formatHistoryLabel(entry: OutreachHistorySummary) {
+    const sourceLabel = entry.source_type === "campaign"
+      ? (entry.campaign_name ?? "Campaign")
+      : (entry.list_name ?? "Outreach list");
+    const dateLabel = new Date(entry.created_at).toLocaleString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+    return `${dateLabel} · ${sourceLabel} · ${entry.offer_name} · ${entry.generated_count} rows`;
+  }
+
+  function jumpToSection(sectionId: string) {
+    document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Render Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   return (
     <>
-      {/* ── Duplicate Search Warning Modal ── */}
+      {/* Ã¢â€â‚¬Ã¢â€â‚¬ Duplicate Search Warning Modal Ã¢â€â‚¬Ã¢â€â‚¬ */}
       {duplicateWarning && (
         <div className="modal-backdrop" onClick={() => setDuplicateWarning(null)}>
           <div className="modal modal-warning" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Keywords already searched</h3>
-              <button className="modal-close" onClick={() => setDuplicateWarning(null)}>✕</button>
+              <button className="modal-close" onClick={() => setDuplicateWarning(null)}>×</button>
             </div>
             <div className="modal-body" style={{ gap: "1rem" }}>
               {duplicateWarning.duplicateType === "campaign" ? (
                 <div className="dupe-info-box">
-                  <div className="dupe-icon">⚡</div>
+                  <div className="dupe-icon">!</div>
                   <div>
                     <strong>This exact search was already completed</strong>
                     <p>It returned <strong>{duplicateWarning.leadCount} leads</strong> on {new Date(duplicateWarning.completedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}.</p>
@@ -360,15 +534,15 @@ export function App() {
                 </div>
               ) : (
                 <div className="dupe-info-box">
-                  <div className="dupe-icon">🔍</div>
+                  <div className="dupe-icon">↺</div>
                   <div>
                     <strong>Some keywords were already searched in this location</strong>
-                    <p>These keywords already have results saved — running again may not find new leads:</p>
+                    <p>These keywords already have results saved. Running again may not find new leads:</p>
                     <ul className="dupe-keyword-list">
                       {duplicateWarning.keywordMatches.map(m => (
                         <li key={m.keyword}>
                           <span className="dupe-kw-tag">"{m.keyword}"</span>
-                          — {m.resultsCount} leads found on {new Date(m.searchedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                          - {m.resultsCount} leads found on {new Date(m.searchedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
                         </li>
                       ))}
                     </ul>
@@ -378,6 +552,7 @@ export function App() {
               <div className="dupe-actions">
                 {duplicateWarning.duplicateType === "campaign" && (
                   <button className="btn-accent" onClick={() => {
+                    setLeadViewMode("campaign");
                     setSelectedCampaignId(duplicateWarning.existingCampaignId);
                     setDuplicateWarning(null);
                   }}>
@@ -396,13 +571,13 @@ export function App() {
         </div>
       )}
 
-      {/* ── Email Preview Modal ── */}
+      {/* Ã¢â€â‚¬Ã¢â€â‚¬ Email Preview Modal Ã¢â€â‚¬Ã¢â€â‚¬ */}
       {modalEmail && (
         <div className="modal-backdrop" onClick={() => setModalEmail(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Emails for <span className="modal-name">{modalEmail.name}</span></h3>
-              <button className="modal-close" onClick={() => setModalEmail(null)}>✕</button>
+              <button className="modal-close" onClick={() => setModalEmail(null)}>×</button>
             </div>
             <div className="modal-body">
               {([
@@ -421,13 +596,13 @@ export function App() {
         </div>
       )}
 
-      {/* ── Add to Outreach List Modal ── */}
+      {/* Ã¢â€â‚¬Ã¢â€â‚¬ Add to Outreach List Modal Ã¢â€â‚¬Ã¢â€â‚¬ */}
       {showListModal && (
         <div className="modal-backdrop" onClick={() => setShowListModal(false)}>
           <div className="modal modal-list" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Add {selectedLeadIds.size} lead{selectedLeadIds.size !== 1 ? "s" : ""} to Outreach List</h3>
-              <button className="modal-close" onClick={() => setShowListModal(false)}>✕</button>
+              <button className="modal-close" onClick={() => setShowListModal(false)}>×</button>
             </div>
             <div className="modal-body" style={{ gap: "1.25rem" }}>
               {/* Create new list */}
@@ -468,17 +643,25 @@ export function App() {
       )}
 
       <main className="layout">
-        {/* ── Workflow Steps ── */}
+        {/* Ã¢â€â‚¬Ã¢â€â‚¬ Workflow Steps Ã¢â€â‚¬Ã¢â€â‚¬ */}
         <div className="workflow-steps">
           <div className="workflow-step"><div className="step-num">1</div><div className="step-label">Collect Leads</div></div>
-          <div className="step-arrow">→</div>
+          <div className="step-arrow">?</div>
           <div className="workflow-step"><div className="step-num">2</div><div className="step-label">Build Offer Library</div></div>
-          <div className="step-arrow">→</div>
+          <div className="step-arrow">?</div>
           <div className="workflow-step"><div className="step-num">3</div><div className="step-label">Generate Outreach</div></div>
         </div>
 
-        {/* ═══════════════════════════════ STEP 1 ═══════════════════════════════ */}
-        <div className="step-section-label">
+        <nav className="section-jump-nav" aria-label="Page sections">
+          <span className="section-jump-label">Quick jump</span>
+          <button type="button" className="section-jump-btn" onClick={() => jumpToSection("step-1-section")}>Step 1</button>
+          <button type="button" className="section-jump-btn" onClick={() => jumpToSection("leads-section")}>Leads</button>
+          <button type="button" className="section-jump-btn" onClick={() => jumpToSection("step-2-section")}>Step 2</button>
+          <button type="button" className="section-jump-btn" onClick={() => jumpToSection("step-3-section")}>Step 3</button>
+        </nav>
+
+        {/* Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â STEP 1 Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â */}
+        <div className="step-section-label" id="step-1-section">
           <span className="step-badge">Step 1</span> Campaign Setup
         </div>
 
@@ -491,20 +674,24 @@ export function App() {
             <label>Collection keywords<input value={form.nicheKeywords} onChange={e => setForm(p => ({ ...p, nicheKeywords: e.target.value }))} placeholder="e.g. dentist, whitening clinic" /></label>
             <label>Sub-niche<input value={form.subNiche} onChange={e => setForm(p => ({ ...p, subNiche: e.target.value }))} /></label>
             <label>Location<input value={form.locationScope} onChange={e => setForm(p => ({ ...p, locationScope: e.target.value }))} /></label>
-            <label>Offer context<textarea value={form.offerNote} onChange={e => setForm(p => ({ ...p, offerNote: e.target.value }))} /></label>
             <button className="btn-primary" disabled={loading} type="submit">+ Create Campaign</button>
           </form>
         </section>
 
-        <section className="panel">
+        <section className="panel" id="leads-section">
           <div className="inline-row">
             <div>
               <h2>Run Control</h2>
               <p style={{ margin: 0, color: "var(--text-soft)", fontSize: "0.9rem" }}>
-                {selectedCampaign ? `${selectedCampaign.sub_niche} — ${selectedCampaign.location_scope}` : "No campaign selected"}
+                {selectedCampaign ? `${selectedCampaign.sub_niche} - ${selectedCampaign.location_scope}` : "No campaign selected"}
               </p>
             </div>
-            <button className="btn-accent" disabled={!selectedCampaignId || loading} onClick={() => void onRunCampaign(false)}>Run Collection</button>
+            <div className="toolbar-actions">
+              <button className="btn-clear btn-danger-lite" type="button" disabled={!selectedCampaignId || loading} onClick={() => void onArchiveCampaign()}>
+                Archive Campaign
+              </button>
+              <button className="btn-accent" disabled={!selectedCampaignId || loading} onClick={() => void onRunCampaign(false)}>Run Collection</button>
+            </div>
           </div>
           <div className="source-toggles">
             {(["google", "yelp", "apify"] as const).map(src => (
@@ -519,12 +706,12 @@ export function App() {
             <label>Campaign
               <select value={selectedCampaignId} onChange={e => setSelectedCampaignId(e.target.value)}>
                 <option value="">Select campaign</option>
-                {campaigns.map(c => <option value={c.id} key={c.id}>{c.sub_niche} — {c.location_scope}</option>)}
+                {campaigns.map(c => <option value={c.id} key={c.id}>{c.sub_niche} - {c.location_scope}</option>)}
               </select>
             </label>
-            <label>Search filter<input value={filters.q} placeholder="Filter table" onChange={e => setFilters(f => ({ ...f, q: e.target.value }))} /></label>
-            <label>Location filter<input value={filters.location} onChange={e => setFilters(f => ({ ...f, location: e.target.value }))} /></label>
-            <button className="btn-clear" type="button" onClick={() => setFilters({ q: "", location: "" })} disabled={!hasActiveFilters}>Clear Filters</button>
+            <div className="run-hint" style={{ maxWidth: "420px" }}>
+              Archive hides incomplete campaigns from normal controls while keeping their leads and history available in All Leads.
+            </div>
           </div>
 
           {run && (
@@ -537,7 +724,7 @@ export function App() {
                 <div className="progress-label">Progress: {progressPct}% ({processedCount}/{run.total_candidates || 0})</div>
                 <div className="progress-bar"><div className="progress-fill" style={{ width: `${progressPct}%` }} /></div>
               </div>
-              {latestRunEvent && <p className="run-live-status">● {latestRunEvent}</p>}
+              {latestRunEvent && <p className="run-live-status">Live: {latestRunEvent}</p>}
               <div className="metrics">
                 {([["Total", run.total_candidates ?? 0], ["Inserted", run.inserted_count ?? 0], ["Updated", run.updated_count ?? 0], ["Deduped", run.deduped_count ?? 0], ["Rejected", run.rejected_no_email_count ?? 0]] as const).map(([label, val]) => (
                   <div className="metric-pill" key={label}><span className="metric-val">{val}</span><span className="metric-label">{label}</span></div>
@@ -557,14 +744,13 @@ export function App() {
           {error && <p className="error">{error}</p>}
         </section>
 
-        {/* ── Leads Table ── */}
         <section className="panel">
           <div className="leads-header">
             <div>
-              <h2>Leads Table</h2>
+              <h2>{leadViewMode === "all" ? "All Leads" : "Campaign Leads"}</h2>
               <p className="run-hint">{leads.length} lead{leads.length !== 1 ? "s" : ""}{hasActiveFilters ? " (filtered)" : ""}</p>
             </div>
-            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+            <div className="toolbar-actions">
               {someLeadsSelected && (
                 <button className="btn-purple" type="button" onClick={() => { setShowListModal(true); setListModalError(""); }}>
                   Add {selectedLeadIds.size} to Outreach List
@@ -573,20 +759,163 @@ export function App() {
               <button className="btn-clear" type="button" onClick={onExportLeads} disabled={!leads.length}>Export CSV</button>
             </div>
           </div>
-          <div className="table-wrap">
-            <table>
+          <div className="lead-view-toggle">
+            <button type="button" className={`lead-view-btn${leadViewMode === "all" ? " lead-view-btn-active" : ""}`} onClick={() => setLeadViewMode("all")}>
+              All Leads
+            </button>
+            <button
+              type="button"
+              className={`lead-view-btn${leadViewMode === "campaign" ? " lead-view-btn-active" : ""}`}
+              onClick={() => setLeadViewMode("campaign")}
+              disabled={!selectedCampaignId}
+            >
+              Current Campaign
+            </button>
+          </div>
+          <div className="lead-filter-grid">
+            {leadViewMode === "all" ? (
+              <label>Campaign filter
+                <select value={filters.campaignId} onChange={e => setFilters(f => ({ ...f, campaignId: e.target.value }))}>
+                  <option value="">All campaigns</option>
+                  {campaignFilterOptions.map(c => <option value={c.id} key={c.id}>{c.sub_niche} - {c.location_scope}{c.status === "archived" ? " (archived)" : ""}</option>)}
+                </select>
+              </label>
+            ) : (
+              <label>Campaign scope
+                <select value={selectedCampaignId} onChange={e => setSelectedCampaignId(e.target.value)}>
+                  <option value="">Select campaign</option>
+                  {campaigns.map(c => <option value={c.id} key={c.id}>{c.sub_niche} - {c.location_scope}</option>)}
+                </select>
+              </label>
+            )}
+            <label>Keyword filter
+              <input list="lead-keyword-options" value={filters.keyword} placeholder="Exact Google search keyword" onChange={e => setFilters(f => ({ ...f, keyword: e.target.value }))} />
+              <datalist id="lead-keyword-options">
+                {keywordOptions.map(keyword => <option value={keyword} key={keyword} />)}
+              </datalist>
+            </label>
+            <label>Business text search<input value={filters.q} placeholder="Name, email, summary, website" onChange={e => setFilters(f => ({ ...f, q: e.target.value }))} /></label>
+            <label>Location filter<input value={filters.location} onChange={e => setFilters(f => ({ ...f, location: e.target.value }))} /></label>
+            <label>Source filter
+              <select value={filters.sourceName} onChange={e => setFilters(f => ({ ...f, sourceName: e.target.value }))}>
+                <option value="">All sources</option>
+                <option value="google">Google</option>
+                <option value="yelp">Yelp</option>
+                <option value="apify">Apify</option>
+              </select>
+            </label>
+            <button className="btn-clear lead-filter-clear" type="button" onClick={() => setFilters({ campaignId: "", keyword: "", q: "", location: "", sourceName: "" })} disabled={!hasActiveFilters}>
+              Clear Filters
+            </button>
+          </div>
+          <div className="lead-mobile-list">
+            {leads.map(lead => (
+              <article className={`lead-mobile-card${selectedLeadIds.has(lead.id) ? " row-selected" : ""}`} key={lead.id}>
+                <div className="lead-mobile-top">
+                  <label className="lead-mobile-check">
+                    <input type="checkbox" checked={selectedLeadIds.has(lead.id)} onChange={() => toggleLead(lead.id)} />
+                    <span>Select</span>
+                  </label>
+                  <div className="lead-primary-cell">
+                    <strong>{lead.name}</strong>
+                    {lead.phone && <span className="lead-subline">{lead.phone}</span>}
+                  </div>
+                </div>
+                <div className="mobile-field-grid">
+                  <div><span className="mobile-field-label">Email</span><span>{lead.email && !lead.email.endsWith("@pending.local") ? lead.email : "-"}</span></div>
+                  <div><span className="mobile-field-label">Location</span><span>{lead.location_text ?? "-"}</span></div>
+                </div>
+                <div className="signal-stack">
+                  <div className="signal-block">
+                    <span className="signal-label">Keywords</span>
+                    <div className="tag-list">
+                      {lead.matched_keywords.length
+                        ? lead.matched_keywords.slice(0, 3).map(keyword => <span className="data-tag data-tag-blue" key={keyword}>{keyword}</span>)
+                        : <span className="tag-empty">-</span>}
+                    </div>
+                    {lead.matched_keywords.length > 2 && <div className="signal-summary">{compactList(lead.matched_keywords, 2)}</div>}
+                  </div>
+                  <div className="signal-block">
+                    <span className="signal-label">Campaigns</span>
+                    <div className="tag-list">
+                      {lead.campaigns.length
+                        ? lead.campaigns.slice(0, 2).map(campaign => (
+                          <span className={`data-tag ${campaign.status === "archived" ? "data-tag-muted" : "data-tag-purple"}`} key={campaign.id}>
+                            {campaign.sub_niche} - {campaign.location_scope}
+                          </span>
+                        ))
+                        : <span className="tag-empty">-</span>}
+                    </div>
+                    {lead.campaigns.length > 2 && <div className="signal-summary">{lead.campaigns.length} campaign matches</div>}
+                  </div>
+                </div>
+                <div className="summary-cell">
+                  <span className="signal-label">What they do</span>
+                  {lead.what_they_do_summary ? (
+                    <>
+                      <p className={`summary-text${expandedSummaries[lead.id] ? " expanded" : ""}`}>{lead.what_they_do_summary}</p>
+                      {lead.what_they_do_summary.length > 160 && (
+                        <button className="summary-toggle" type="button" onClick={() => setExpandedSummaries(p => ({ ...p, [lead.id]: !p[lead.id] }))}>
+                          {expandedSummaries[lead.id] ? "Collapse" : "Expand"}
+                        </button>
+                      )}
+                    </>
+                  ) : <span className="tag-empty">-</span>}
+                </div>
+                <div className="mobile-field-grid">
+                  <div><span className="mobile-field-label">Website</span><span>{lead.website ? <a href={lead.website} target="_blank" rel="noreferrer">{lead.website.replace(/^https?:\/\//, "")}</a> : "-"}</span></div>
+                  <div><span className="mobile-field-label">Phone</span><span>{lead.phone ?? "-"}</span></div>
+                </div>
+              </article>
+            ))}
+            {!leads.length && (
+              <div className="empty-state compact-empty-state">
+                <p>{hasActiveFilters ? "No leads match current filters." : "No leads yet. Run a campaign to start building the lead catalog."}</p>
+              </div>
+            )}
+          </div>
+          <div className="table-wrap lead-table-wrap">
+            <table className="lead-table">
               <thead>
                 <tr>
-                  <th style={{ width: "3%" }}><input type="checkbox" checked={allLeadsSelected} onChange={toggleAllLeads} title="Select all" /></th>
-                  <th>Name</th><th>Email</th><th>What they do</th><th>Location</th><th>Phone</th><th>Website</th>
+                  <th className="lead-check-col"><input type="checkbox" checked={allLeadsSelected} onChange={toggleAllLeads} title="Select all" /></th>
+                  <th className="lead-name-col">Lead</th><th>Email</th><th>Keywords</th><th>Campaigns</th><th>What they do</th><th>Location</th>
                 </tr>
               </thead>
               <tbody>
                 {leads.map(lead => (
                   <tr key={lead.id} className={selectedLeadIds.has(lead.id) ? "row-selected" : ""}>
-                    <td><input type="checkbox" checked={selectedLeadIds.has(lead.id)} onChange={() => toggleLead(lead.id)} /></td>
-                    <td>{lead.name}</td>
-                    <td>{lead.email && !lead.email.endsWith("@pending.local") ? lead.email : "—"}</td>
+                    <td className="lead-check-col"><input type="checkbox" checked={selectedLeadIds.has(lead.id)} onChange={() => toggleLead(lead.id)} /></td>
+                    <td className="lead-name-col">
+                      <div className="lead-primary-cell">
+                        <strong>{lead.name}</strong>
+                        {lead.phone && <span className="lead-subline">{lead.phone}</span>}
+                        {lead.website && <a className="lead-subline lead-inline-link" href={lead.website} target="_blank" rel="noreferrer">{lead.website.replace(/^https?:\/\//, "")}</a>}
+                      </div>
+                    </td>
+                    <td className="td-mono">{lead.email && !lead.email.endsWith("@pending.local") ? lead.email : "-"}</td>
+                    <td>
+                      {lead.matched_keywords.length ? (
+                        <div className="tag-list">
+                          <span className="data-tag data-tag-blue">{lead.matched_keywords[0]}</span>
+                          {lead.matched_keywords.length > 1 && <span className="tag-more">+{lead.matched_keywords.length - 1}</span>}
+                        </div>
+                      ) : <span className="tag-empty">-</span>}
+                      {lead.matched_keywords.length > 1 && <div className="signal-summary">{compactList(lead.matched_keywords, 2)}</div>}
+                    </td>
+                    <td>
+                      {lead.campaigns.length ? (
+                        <>
+                          <div className="tag-list">
+                            <span className={`data-tag ${lead.campaigns[0].status === "archived" ? "data-tag-muted" : "data-tag-purple"}`}>
+                              {lead.campaigns[0].sub_niche} - {lead.campaigns[0].location_scope}
+                            </span>
+                            {lead.campaigns.length > 1 && <span className="tag-more">+{lead.campaigns.length - 1}</span>}
+                          </div>
+                          {lead.campaigns.length > 1 && <div className="signal-summary">{lead.campaigns.length} campaign matches</div>}
+                        </>
+                      ) : <span className="tag-empty">-</span>}
+                    </td>
                     <td>
                       {lead.what_they_do_summary ? (
                         <div className="summary-cell">
@@ -597,16 +926,14 @@ export function App() {
                             </button>
                           )}
                         </div>
-                      ) : "—"}
+                      ) : "-"}
                     </td>
-                    <td>{lead.location_text ?? "—"}</td>
-                    <td>{lead.phone ?? "—"}</td>
-                    <td>{lead.website ? <a href={lead.website} target="_blank" rel="noreferrer">{lead.website}</a> : "—"}</td>
+                    <td>{lead.location_text ?? "-"}</td>
                   </tr>
                 ))}
                 {!leads.length && (
                   <tr><td colSpan={7} style={{ textAlign: "center", color: "var(--text-muted)", padding: "2rem" }}>
-                    {hasActiveFilters ? "No leads match current filters." : "No leads yet. Create a campaign and run collection."}
+                    {hasActiveFilters ? "No leads match current filters." : "No leads yet. Run a campaign to start building the lead catalog."}
                   </td></tr>
                 )}
               </tbody>
@@ -614,8 +941,7 @@ export function App() {
           </div>
         </section>
 
-        {/* ═══════════════════════════════ STEP 2 ═══════════════════════════════ */}
-        <div className="step-section-label" style={{ marginTop: "1.5rem" }}>
+        <div className="step-section-label" id="step-2-section" style={{ marginTop: "1.5rem" }}>
           <span className="step-badge step-badge-purple">Step 2</span> Offer Library
         </div>
 
@@ -623,7 +949,7 @@ export function App() {
           <div className="offer-library-header">
             <div>
               <h2>Offer Library</h2>
-              <p className="run-hint">Save your offer once — reuse it across any lead list.</p>
+              <p className="run-hint">Save your offer once, then reuse it across any lead list.</p>
             </div>
             <button className="btn-purple" type="button" onClick={() => { setShowOfferForm(v => !v); setOfferMode("manual"); setAiRefined(false); }}>
               {showOfferForm ? "Cancel" : "+ New Offer"}
@@ -632,17 +958,16 @@ export function App() {
 
           {showOfferForm && (
             <div className="offer-form">
-              {/* Mode tabs */}
               <div className="offer-mode-tabs">
                 <button type="button" className={`offer-tab${offerMode === "manual" ? " offer-tab-active" : ""}`} onClick={() => setOfferMode("manual")}>
-                  ✏️ Manual
+                  Manual
                 </button>
                 <button type="button" className={`offer-tab${offerMode === "ai" ? " offer-tab-active" : ""}`} onClick={() => setOfferMode("ai")}>
-                  ✨ AI-Assisted
+                  AI-Assisted
                 </button>
               </div>
 
-              {/* AI idea input — shown in AI mode before draft, or always for re-prompting */}
+              {/* AI idea input shown in AI mode before draft, or always for re-prompting */}
               {offerMode === "ai" && !aiRefined && (
                 <div className="ai-idea-section">
                   <label className="offer-form-full">
@@ -650,22 +975,22 @@ export function App() {
                     <textarea
                       value={aiIdeaText}
                       onChange={e => setAiIdeaText(e.target.value)}
-                      placeholder="e.g. I build AI systems for construction companies — automating their job scheduling, invoicing and client follow-ups so they stop losing hours to admin every week"
+                      placeholder="e.g. I build AI systems for construction companies - automating their job scheduling, invoicing and client follow-ups so they stop losing hours to admin every week"
                       style={{ minHeight: "100px" }}
                     />
                   </label>
                   {offerError && <p className="error">{offerError}</p>}
                   <button className="btn-purple" type="button" disabled={aiIdeaText.trim().length < 10 || aiDrafting} onClick={() => void onAiDraft()}>
-                    {aiDrafting ? <><span className="spinner" /> Drafting with AI...</> : "✨ Draft with AI"}
+                    {aiDrafting ? <><span className="spinner" /> Drafting with AI...</> : "Draft with AI"}
                   </button>
                 </div>
               )}
 
-              {/* Editable fields — shown after AI draft OR always in manual mode */}
+              {/* Editable fields shown after AI draft or always in manual mode */}
               {(offerMode === "manual" || aiRefined) && (
                 <form onSubmit={onSaveOffer}>
                   {offerMode === "ai" && aiRefined && (
-                    <div className="ai-drafted-banner">✨ AI-drafted — review and edit before saving</div>
+                    <div className="ai-drafted-banner">AI-drafted - review and edit before saving</div>
                   )}
                   <div className="offer-form-grid" style={{ marginTop: "0.75rem" }}>
                     <label className="offer-form-full">Offer name
@@ -685,7 +1010,7 @@ export function App() {
                     </label>
                   </div>
 
-                  {/* Refine row — only after AI draft */}
+                  {/* Refine row only after AI draft */}
                   {offerMode === "ai" && aiRefined && (
                     <div className="refine-row">
                       <input
@@ -695,7 +1020,7 @@ export function App() {
                         onKeyDown={e => e.key === "Enter" && void onAiRefine()}
                       />
                       <button type="button" className="btn-purple" disabled={!refinementNote.trim() || aiRefining} onClick={() => void onAiRefine()}>
-                        {aiRefining ? <><span className="spinner" /> Refining...</> : "↺ Refine"}
+                        {aiRefining ? <><span className="spinner" /> Refining...</> : "Refine"}
                       </button>
                     </div>
                   )}
@@ -708,7 +1033,6 @@ export function App() {
               )}
             </div>
           )}
-
           {offers.length > 0 ? (
             <div className="offer-grid" style={{ marginTop: showOfferForm ? "1.25rem" : "0.5rem" }}>
               {offers.map(offer => {
@@ -718,9 +1042,9 @@ export function App() {
                     onClick={() => setSelectedOfferId(offer.id)} role="button" tabIndex={0}
                     onKeyDown={e => e.key === "Enter" && setSelectedOfferId(offer.id)}>
                     <div className="offer-card-top">
-                      <div className="offer-card-check">{sel ? "✓" : ""}</div>
+                      <div className="offer-card-check">{sel ? "Selected" : ""}</div>
                       <button className="offer-card-remove" type="button"
-                        onClick={e => { e.stopPropagation(); void onDeleteOffer(offer.id); }}>✕</button>
+                        onClick={e => { e.stopPropagation(); void onDeleteOffer(offer.id); }}>x</button>
                     </div>
                     <div className="offer-card-name">{offer.offer_name}</div>
                     <div className="offer-card-summary">{offer.offer_summary}</div>
@@ -736,15 +1060,14 @@ export function App() {
           ) : (
             !showOfferForm && (
               <div className="empty-state">
-                <div className="empty-icon">📋</div>
+                <div className="empty-icon">+</div>
                 <p>No offers saved yet. Click <strong>+ New Offer</strong> to create your first one.</p>
               </div>
             )
           )}
         </section>
 
-        {/* ═══════════════════════════════ STEP 3 ═══════════════════════════════ */}
-        <div className="step-section-label" style={{ marginTop: "1.5rem" }}>
+        <div className="step-section-label" id="step-3-section" style={{ marginTop: "1.5rem" }}>
           <span className="step-badge step-badge-green">Step 3</span> Generate Outreach Emails
         </div>
 
@@ -752,7 +1075,7 @@ export function App() {
           <div className="leads-header">
             <div>
               <h2>Outreach Generator</h2>
-              <p className="run-hint">Pick a lead source + offer → generate personalised emails for every lead.</p>
+              <p className="run-hint">Pick a lead source and an offer, then generate personalised emails for every lead.</p>
             </div>
             {outreachRows.length > 0 && (
               <button className="btn-green" type="button" onClick={onExportOutreach}>
@@ -761,7 +1084,6 @@ export function App() {
             )}
           </div>
 
-          {/* Source mode toggle */}
           <div className="source-mode-toggle">
             <button type="button"
               className={`source-mode-btn${outreachSourceMode === "campaign" ? " source-mode-active" : ""}`}
@@ -780,12 +1102,12 @@ export function App() {
               <div className="outreach-config-label">{outreachSourceMode === "campaign" ? "Lead list (campaign)" : "Outreach List"}</div>
               {outreachSourceMode === "campaign" ? (
                 <select className="outreach-select" value={outreachCampaignId} onChange={e => setOutreachCampaignId(e.target.value)}>
-                  <option value="">— Choose campaign —</option>
-                  {campaigns.map(c => <option value={c.id} key={c.id}>{c.sub_niche} — {c.location_scope}</option>)}
+                  <option value="">Choose campaign</option>
+                  {campaigns.map(c => <option value={c.id} key={c.id}>{c.sub_niche} - {c.location_scope}</option>)}
                 </select>
               ) : (
                 <select className="outreach-select" value={outreachListId} onChange={e => setOutreachListId(e.target.value)}>
-                  <option value="">— Choose list —</option>
+                  <option value="">Choose list</option>
                   {outreachLists.map(l => <option value={l.id} key={l.id}>{l.name} ({l.lead_count} leads)</option>)}
                 </select>
               )}
@@ -794,7 +1116,7 @@ export function App() {
             <div className="outreach-config-item">
               <div className="outreach-config-label">Offer</div>
               <select className="outreach-select" value={selectedOfferId} onChange={e => setSelectedOfferId(e.target.value)}>
-                <option value="">— Choose offer —</option>
+                <option value="">Choose offer</option>
                 {offers.map(o => <option value={o.id} key={o.id}>{o.offer_name}</option>)}
               </select>
             </div>
@@ -803,35 +1125,77 @@ export function App() {
             </button>
           </div>
 
-          {/* Outreach Lists management */}
+          <div className="outreach-history-panel">
+            <div className="outreach-history-head">
+              <div>
+                <div className="outreach-config-label">Saved history</div>
+                <p className="run-hint">Every generated outreach set is stored here so you can reopen it after refresh and export it again without spending API credits.</p>
+              </div>
+              {selectedOutreachHistory && (
+                <span className="outreach-tag outreach-tag-green">
+                  Loaded: {new Date(selectedOutreachHistory.created_at).toLocaleString("en-GB", {
+                    day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit"
+                  })}
+                </span>
+              )}
+            </div>
+            <div className="outreach-history-controls">
+              <select
+                className="outreach-select"
+                value={selectedOutreachHistoryId}
+                onChange={(e) => {
+                  const nextId = e.target.value;
+                  setSelectedOutreachHistoryId(nextId);
+                  if (nextId) void loadOutreachHistoryEntry(nextId);
+                }}
+              >
+                <option value="">Choose saved outreach history</option>
+                {orderedOutreachHistory.map((entry) => (
+                  <option value={entry.id} key={entry.id}>{formatHistoryLabel(entry)}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => void loadOutreachHistory()}
+                disabled={loadingOutreachHistory}
+              >
+                {loadingOutreachHistory ? "Loading..." : "Refresh history"}
+              </button>
+            </div>
+            {outreachHistory.length === 0 && (
+              <div className="history-empty">No saved outreach history yet. Your first generation will appear here automatically.</div>
+            )}
+          </div>
+
           {outreachSourceMode === "list" && outreachLists.length > 0 && (
             <div className="outreach-lists-row">
               {outreachLists.map(list => (
                 <div key={list.id} className="outreach-list-chip">
                   <span>{list.name}</span>
                   <span className="outreach-list-chip-count">{list.lead_count}</span>
-                  <button type="button" onClick={() => void onDeleteList(list.id)} title="Remove list">✕</button>
+                  <button type="button" onClick={() => void onDeleteList(list.id)} title="Remove list">x</button>
                 </div>
               ))}
             </div>
           )}
           {outreachSourceMode === "list" && outreachLists.length === 0 && !generatingOutreach && (
             <div className="empty-state" style={{ padding: "1.5rem" }}>
-              <div className="empty-icon">📌</div>
-              <p>No outreach lists yet. Go to the <strong>Leads Table</strong> above, check some leads, and click <strong>Add to Outreach List</strong>.</p>
+              <div className="empty-icon">+</div>
+              <p>No outreach lists yet. Go to <strong>All Leads</strong> above, check some leads, and click <strong>Add to Outreach List</strong>.</p>
             </div>
           )}
 
-          {/* Summary tags */}
           {(outreachCampaign || outreachList || selectedOffer) && (
             <div className="outreach-summary-row">
               {outreachSourceMode === "campaign" && outreachCampaign && (
-                <span className="outreach-tag outreach-tag-blue">List: {outreachCampaign.sub_niche} — {outreachCampaign.location_scope}</span>
+                <span className="outreach-tag outreach-tag-blue">List: {outreachCampaign.sub_niche} - {outreachCampaign.location_scope}</span>
               )}
               {outreachSourceMode === "list" && outreachList && (
                 <span className="outreach-tag outreach-tag-blue">List: {outreachList.name} ({outreachList.lead_count} leads)</span>
               )}
               {selectedOffer && <span className="outreach-tag outreach-tag-purple">Offer: {selectedOffer.offer_name}</span>}
+              {selectedOutreachHistory && <span className="outreach-tag outreach-tag-green">History rows: {selectedOutreachHistory.generated_count}</span>}
             </div>
           )}
 
@@ -854,11 +1218,31 @@ export function App() {
                 leads with personalised emails ready.
                 <span className="results-hint">Click any row to preview all 3 emails.</span>
               </div>
-              <div className="table-wrap">
+              <div className="outreach-mobile-list">
+                {outreachRows.map(row => (
+                  <article key={row.lead_id} className="outreach-mobile-card" onClick={() => setModalEmail({ name: row.name, opener_subject: row.opener_subject, opener_body: row.opener_body, followup1_subject: row.followup1_subject, followup1_body: row.followup1_body, followup2_subject: row.followup2_subject, followup2_body: row.followup2_body })}>
+                    <div className="lead-primary-cell">
+                      <strong>{row.name}</strong>
+                      {row.phone && <span className="lead-subline">{row.phone}</span>}
+                    </div>
+                    <div className="mobile-field-grid">
+                      <div><span className="mobile-field-label">Email</span><span>{row.email && !row.email.endsWith("@pending.local") ? row.email : "-"}</span></div>
+                      <div><span className="mobile-field-label">Website</span><span>{row.website ? row.website.replace(/^https?:\/\//, "") : "-"}</span></div>
+                    </div>
+                    <div className="signal-stack">
+                      <div className="signal-block"><span className="signal-label">Opener</span><span className="subject-preview subject-preview-mobile">{row.opener_subject}</span></div>
+                      <div className="signal-block"><span className="signal-label">Follow-up 1</span><span className="subject-preview subject-preview-mobile">{row.followup1_subject}</span></div>
+                      <div className="signal-block"><span className="signal-label">Follow-up 2</span><span className="subject-preview subject-preview-mobile">{row.followup2_subject}</span></div>
+                    </div>
+                    <button className="btn-preview" type="button">View emails</button>
+                  </article>
+                ))}
+              </div>
+              <div className="table-wrap outreach-table-wrap">
                 <table className="outreach-table">
                   <thead>
                     <tr>
-                      <th>Name</th><th>Email</th><th>Phone</th><th>Website</th>
+                      <th className="lead-name-col">Lead</th><th>Email</th>
                       <th><span className="email-col-tag" style={{ background: "#1877f2" }}>Opener</span>Subject</th>
                       <th><span className="email-col-tag" style={{ background: "#7b5ea7" }}>Follow-up 1</span>Subject</th>
                       <th><span className="email-col-tag" style={{ background: "#e67e22" }}>Follow-up 2</span>Subject</th>
@@ -869,10 +1253,14 @@ export function App() {
                     {outreachRows.map(row => (
                       <tr key={row.lead_id} className="outreach-row"
                         onClick={() => setModalEmail({ name: row.name, opener_subject: row.opener_subject, opener_body: row.opener_body, followup1_subject: row.followup1_subject, followup1_body: row.followup1_body, followup2_subject: row.followup2_subject, followup2_body: row.followup2_body })}>
-                        <td><strong>{row.name}</strong></td>
-                        <td className="td-mono">{row.email && !row.email.endsWith("@pending.local") ? row.email : "—"}</td>
-                        <td className="td-mono">{row.phone ?? "—"}</td>
-                        <td>{row.website ? <a href={row.website} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>{row.website.replace(/^https?:\/\//, "")}</a> : "—"}</td>
+                        <td className="lead-name-col">
+                          <div className="lead-primary-cell">
+                            <strong>{row.name}</strong>
+                            {row.phone && <span className="lead-subline">{row.phone}</span>}
+                            {row.website && <a className="lead-subline lead-inline-link" href={row.website} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>{row.website.replace(/^https?:\/\//, "")}</a>}
+                          </div>
+                        </td>
+                        <td className="td-mono">{row.email && !row.email.endsWith("@pending.local") ? row.email : "-"}</td>
                         <td><span className="subject-preview">{row.opener_subject}</span></td>
                         <td><span className="subject-preview">{row.followup1_subject}</span></td>
                         <td><span className="subject-preview">{row.followup2_subject}</span></td>
@@ -887,8 +1275,8 @@ export function App() {
 
           {!outreachRows.length && !generatingOutreach && (
             <div className="empty-state">
-              <div className="empty-icon">✉️</div>
-              <p>Select a lead source and an offer above, then click <strong>Generate Emails</strong>.</p>
+              <div className="empty-icon">i</div>
+              <p>Select a lead source and an offer above, then click <strong>Generate Emails</strong> or load a saved history entry.</p>
             </div>
           )}
         </section>

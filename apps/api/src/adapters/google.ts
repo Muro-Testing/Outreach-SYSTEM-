@@ -273,6 +273,7 @@ export async function fetchGoogleLeadsForKeyword(input: SearchInput): Promise<Ra
 
     return {
       sourceName: "google" as const,
+      matchedKeyword: input.niche,
       externalId: placeId,
       externalUrl: placeId
         ? `https://www.google.com/maps/place/?q=place_id:${placeId}`
@@ -302,21 +303,13 @@ export async function fetchGoogleLeads(input: SearchInput & { allKeywords?: stri
     ? input.allKeywords
     : [input.niche];
 
-  // Run one search per keyword, collecting all place_ids to deduplicate
-  const seenPlaceIds = new Set<string>();
   const allLeads: RawLead[] = [];
 
   for (const keyword of keywords) {
     const keywordInput: SearchInput = { ...input, niche: keyword };
     const leads = await fetchGoogleLeadsForKeyword(keywordInput);
-    for (const lead of leads) {
-      const id = String(lead.externalId ?? "");
-      if (id && seenPlaceIds.has(id)) continue;
-      if (id) seenPlaceIds.add(id);
-      allLeads.push(lead);
-    }
+    allLeads.push(...leads);
   }
 
   return allLeads;
 }
-

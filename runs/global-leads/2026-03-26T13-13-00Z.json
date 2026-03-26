@@ -1,0 +1,149 @@
+{
+  "metadata": {
+    "task": "global-leads-validation",
+    "executedAt": "2026-03-26T13:11:38.122Z",
+    "leadCount": 2,
+    "sourceRowCount": 3
+  },
+  "raw_output": {
+    "leads": [
+      {
+        "id": "lead-1",
+        "campaign_id": "campaign-a",
+        "last_run_id": "run-1",
+        "name": "Bright Dental",
+        "email": "hello@bright.example",
+        "what_they_do_summary": "Dental implants and cosmetic dentistry",
+        "location_text": "London, UK",
+        "phone": "123",
+        "website": "https://bright.example",
+        "website_domain": "bright.example",
+        "created_at": "2026-03-26T10:00:00.000Z",
+        "updated_at": "2026-03-26T10:00:00.000Z"
+      },
+      {
+        "id": "lead-2",
+        "campaign_id": "campaign-c",
+        "last_run_id": "run-2",
+        "name": "Calm Skin Studio",
+        "email": "hello@calmskin.example",
+        "what_they_do_summary": "Skin clinic and facial treatments",
+        "location_text": "Manchester, UK",
+        "phone": "456",
+        "website": "https://calmskin.example",
+        "website_domain": "calmskin.example",
+        "created_at": "2026-03-26T09:00:00.000Z",
+        "updated_at": "2026-03-26T09:00:00.000Z"
+      }
+    ],
+    "sourceRows": [
+      {
+        "lead_id": "lead-1",
+        "source_name": "google",
+        "matched_keyword": "dentist",
+        "campaign": {
+          "id": "campaign-a",
+          "sub_niche": "Cosmetic Dentistry",
+          "location_scope": "London, UK",
+          "status": "active"
+        }
+      },
+      {
+        "lead_id": "lead-1",
+        "source_name": "google",
+        "matched_keyword": "dental implants",
+        "campaign": {
+          "id": "campaign-b",
+          "sub_niche": "Implant Clinic",
+          "location_scope": "London, UK",
+          "status": "archived"
+        }
+      },
+      {
+        "lead_id": "lead-2",
+        "source_name": "yelp",
+        "matched_keyword": null,
+        "campaign": {
+          "id": "campaign-c",
+          "sub_niche": "Skin Clinic",
+          "location_scope": "Manchester, UK",
+          "status": "active"
+        }
+      }
+    ]
+  },
+  "processed_output": {
+    "aggregated": [
+      {
+        "id": "lead-1",
+        "campaign_id": "campaign-a",
+        "last_run_id": "run-1",
+        "name": "Bright Dental",
+        "email": "hello@bright.example",
+        "what_they_do_summary": "Dental implants and cosmetic dentistry",
+        "location_text": "London, UK",
+        "phone": "123",
+        "website": "https://bright.example",
+        "website_domain": "bright.example",
+        "created_at": "2026-03-26T10:00:00.000Z",
+        "updated_at": "2026-03-26T10:00:00.000Z",
+        "matched_keywords": [
+          "dental implants",
+          "dentist"
+        ],
+        "source_names": [
+          "google"
+        ],
+        "campaigns": [
+          {
+            "id": "campaign-a",
+            "sub_niche": "Cosmetic Dentistry",
+            "location_scope": "London, UK",
+            "status": "active"
+          },
+          {
+            "id": "campaign-b",
+            "sub_niche": "Implant Clinic",
+            "location_scope": "London, UK",
+            "status": "archived"
+          }
+        ]
+      },
+      {
+        "id": "lead-2",
+        "campaign_id": "campaign-c",
+        "last_run_id": "run-2",
+        "name": "Calm Skin Studio",
+        "email": "hello@calmskin.example",
+        "what_they_do_summary": "Skin clinic and facial treatments",
+        "location_text": "Manchester, UK",
+        "phone": "456",
+        "website": "https://calmskin.example",
+        "website_domain": "calmskin.example",
+        "created_at": "2026-03-26T09:00:00.000Z",
+        "updated_at": "2026-03-26T09:00:00.000Z",
+        "matched_keywords": [],
+        "source_names": [
+          "yelp"
+        ],
+        "campaigns": [
+          {
+            "id": "campaign-c",
+            "sub_niche": "Skin Clinic",
+            "location_scope": "Manchester, UK",
+            "status": "active"
+          }
+        ]
+      }
+    ],
+    "dentistKeywordLeadIds": [
+      "lead-1"
+    ],
+    "implantTextLeadIds": [
+      "lead-1"
+    ],
+    "londonLeadIds": [
+      "lead-1"
+    ]
+  }
+}

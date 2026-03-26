@@ -1,13 +1,33 @@
 import { Router } from "express";
-import { createCampaignRequestSchema, runCampaignRequestSchema } from "@outreach/contracts";
+import { campaignsListQuerySchema, createCampaignRequestSchema, runCampaignRequestSchema } from "@outreach/contracts";
 import { supabase } from "../db.js";
 import { executeCollectionRun, buildQueryFingerprint } from "../services/collection.js";
 
 export const campaignsRouter = Router();
 
-campaignsRouter.get("/", async (_, res) => {
-  const result = await supabase.from("campaigns").select("*").order("created_at", { ascending: false });
+campaignsRouter.get("/", async (req, res) => {
+  const parsed = campaignsListQuerySchema.safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  let query = supabase.from("campaigns").select("*").order("created_at", { ascending: false });
+  if (!parsed.data.includeArchived) query = query.neq("status", "archived");
+
+  const result = await query;
   if (result.error) return res.status(500).json({ error: result.error.message });
+  return res.json(result.data);
+});
+
+campaignsRouter.patch("/:id/archive", async (req, res) => {
+  const campaignId = req.params.id;
+  const result = await supabase
+    .from("campaigns")
+    .update({ status: "archived", updated_at: new Date().toISOString() })
+    .eq("id", campaignId)
+    .select("*")
+    .single();
+
+  if (result.error) return res.status(500).json({ error: result.error.message });
+  if (!result.data) return res.status(404).json({ error: "Campaign not found" });
   return res.json(result.data);
 });
 
@@ -49,7 +69,7 @@ campaignsRouter.post("/", async (req, res) => {
       niche_keywords: parsed.data.nicheKeywords,
       sub_niche: parsed.data.subNiche,
       location_scope: parsed.data.locationScope,
-      offer_note: parsed.data.offerNote,
+      offer_note: "",
       status: "active"
     })
     .select("*")
@@ -78,11 +98,14 @@ campaignsRouter.post("/:id/run", async (req, res) => {
 
   const campaign = await supabase
     .from("campaigns")
-    .select("id,niche_keywords,sub_niche,location_scope")
+    .select("id,niche_keywords,sub_niche,location_scope,status")
     .eq("id", campaignId)
     .single();
 
   if (campaign.error || !campaign.data) return res.status(404).json({ error: "Campaign not found" });
+  if (campaign.data.status === "archived") {
+    return res.status(400).json({ error: "Archived campaigns cannot run collection. Restore or recreate the campaign first." });
+  }
 
   const force = Boolean(runBody.data.force);
   if (!force) {
