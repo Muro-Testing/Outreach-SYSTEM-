@@ -1,6 +1,6 @@
 import { extractBusinessEmails, normalizeBusinessEmail } from "./email.js";
 
-type CrawlResult = {
+export type CrawlResult = {
   visited: string[];
   emails: string[];
   text: string;

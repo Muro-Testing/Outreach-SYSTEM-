@@ -1,4 +1,5 @@
 import { crawlWebsiteForContactData } from "./crawler.js";
+import type { CrawlResult } from "./crawler.js";
 import { summarizeBusinessWithMistral } from "./ai.js";
 import { normalizeBusinessEmail } from "./email.js";
 import type { EnrichmentResult } from "../types.js";
@@ -8,10 +9,10 @@ export async function enrichBusinessFromWebsite(input: {
   website: string | null;
   existingEmail: string | null;
   existingSummary: string | null;
-}): Promise<EnrichmentResult | null> {
+}, prefetchedCrawl?: CrawlResult | null): Promise<EnrichmentResult | null> {
   if (!input.website) return null;
 
-  const crawl = await crawlWebsiteForContactData(input.website, { maxPages: 8, maxDepth: 2 });
+  const crawl = prefetchedCrawl ?? await crawlWebsiteForContactData(input.website, { maxPages: 8, maxDepth: 2 });
 
   const chosenEmail = normalizeBusinessEmail(input.existingEmail ?? "")
     ?? normalizeBusinessEmail(crawl.emails[0] ?? "")

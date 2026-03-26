@@ -1,0 +1,39 @@
+{
+  "task": "crawl-optimization-and-email-standards",
+  "timestamp": "2026-03-26T15:44:52Z",
+  "inputs": {
+    "user_requests": [
+      "Parallelize crawl processing because long runs are too slow",
+      "Explain and reduce the mismatch between enrichment counts and current campaign visible leads",
+      "Revise outreach email generation against the email standards document"
+    ]
+  },
+  "processed_output": {
+    "build": "passed",
+    "test": "passed",
+    "collection": {
+      "crawl_concurrency": 8,
+      "progress_message": "unique email-verified leads",
+      "enrichment_deduped_by_lead_id": true,
+      "crawl_data_reused_for_enrichment": true
+    },
+    "outreach": {
+      "plain_text_bias": true,
+      "company_name_instead_of_first_name": true,
+      "shorter_subject_and_body_rules": true
+    }
+  },
+  "raw_output": {
+    "build": "outreach-system build completed successfully",
+    "test": "vitest: 4 files passed, 12 tests passed"
+  },
+  "metadata": {
+    "files_touched": [
+      "apps/api/src/services/collection.ts",
+      "apps/api/src/services/crawler.ts",
+      "apps/api/src/services/enrich.ts",
+      "apps/api/src/services/outreach.ts",
+      "docs/plan-2026-03-26-1515-crawl-optimization-and-email-standards.md"
+    ]
+  }
+}

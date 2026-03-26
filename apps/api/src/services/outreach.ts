@@ -28,8 +28,6 @@ export type GeneratedEmails = {
   followup2_body: string;
 };
 
-// Extract a short, natural business name from the full Google Maps name
-// e.g. "TEL Constructions - Construction Company in London" → "TEL Constructions"
 function shortName(fullName: string): string {
   return fullName
     .split(/\s*[-–|]\s*/)[0]
@@ -38,68 +36,53 @@ function shortName(fullName: string): string {
     .trim();
 }
 
-// Clean up the what_they_do_summary to a short usable phrase
-function shortBizDescription(summary: string | null, name: string): string {
+function shortBizDescription(summary: string | null): string {
   if (!summary) return "your business";
-  const s = summary.replace(/\s+/g, " ").trim();
-  return s.length > 120 ? s.slice(0, 120).replace(/\s+\S+$/, "") + "..." : s;
+  const clean = summary.replace(/\s+/g, " ").trim();
+  return clean.length > 120 ? `${clean.slice(0, 120).replace(/\s+\S+$/, "")}...` : clean;
 }
 
 function fallbackEmails(lead: LeadForOutreach, offer: OfferForOutreach): GeneratedEmails {
   const biz = shortName(lead.name);
-  const desc = shortBizDescription(lead.what_they_do_summary, lead.name);
+  const desc = shortBizDescription(lead.what_they_do_summary);
   const domain = lead.website ? lead.website.replace(/^https?:\/\/(www\.)?/, "").split("/")[0] : null;
-  const siteRef = domain ? ` (saw ${domain})` : "";
+  const siteRef = domain ? ` on ${domain}` : "";
 
   return {
-    opener_subject: `A quick idea for ${biz}`,
-
+    opener_subject: `Quick idea for ${biz}`,
     opener_body: [
       `Hi ${biz} team,`,
       ``,
-      `I was looking at your work${siteRef} and noticed something that caught my attention — ${desc}.`,
+      `I had a look at ${biz}${siteRef} and noticed you focus on ${desc}. Teams in that position usually end up losing time to ${offer.target_problem} when things get busy.`,
       ``,
-      `We work with businesses like yours to help them ${offer.key_outcome}. Most of the teams we help were spending too much time on ${offer.target_problem} before they brought us in.`,
-      ``,
-      `We do this through ${offer.offer_summary}.`,
+      `We help businesses like yours ${offer.key_outcome} through ${offer.offer_summary}.`,
       ``,
       `${offer.call_to_action}`,
       ``,
       `Best,`
     ].join("\n"),
-
-    followup1_subject: `Re: A quick idea for ${biz}`,
-
+    followup1_subject: `Re: Quick idea for ${biz}`,
     followup1_body: [
-      `Hi again,`,
+      `Hi ${biz} team,`,
       ``,
-      `Just circling back on my last message in case it got buried.`,
-      ``,
-      `The short version: we help ${desc.slice(0, 60)}... businesses ${offer.key_outcome} — without adding headcount.`,
+      `Following up in case this is relevant. We usually see teams like yours hit friction around ${offer.target_problem} before they fix the process properly.`,
       ``,
       `${offer.call_to_action}`,
       ``,
       `Best,`
     ].join("\n"),
-
-    followup2_subject: `Last one from me — ${biz}`,
-
+    followup2_subject: `Last note for ${biz}`,
     followup2_body: [
-      `Hi,`,
+      `Hi ${biz} team,`,
       ``,
-      `I'll keep this short — this is my last follow-up.`,
+      `Last note from me. If improving ${offer.target_problem} is on the list this quarter, happy to show you a simple way to ${offer.key_outcome}.`,
       ``,
-      `If ${offer.target_problem} is ever something you want to solve properly, we'd love to show you what we've built for similar businesses.`,
-      ``,
-      `${offer.call_to_action}`,
-      ``,
-      `Either way, wishing you and the ${biz} team all the best.`
+      `${offer.call_to_action}`
     ].join("\n")
   };
 }
 
 function parseEmailJson(content: string): GeneratedEmails | null {
-  // Strip markdown code fences
   const stripped = content
     .replace(/^```json\s*/im, "")
     .replace(/^```\s*/im, "")
@@ -120,10 +103,16 @@ function parseEmailJson(content: string): GeneratedEmails | null {
     const followup2_subject = String(parsed.followup2_subject ?? "").trim();
     const followup2_body = String(parsed.followup2_body ?? "").trim();
 
-    // Reject if core fields are missing or too short
     if (!opener_subject || opener_body.length < 40) return null;
 
-    return { opener_subject, opener_body, followup1_subject, followup1_body, followup2_subject, followup2_body };
+    return {
+      opener_subject,
+      opener_body,
+      followup1_subject,
+      followup1_body,
+      followup2_subject,
+      followup2_body
+    };
   } catch {
     return null;
   }
@@ -138,60 +127,63 @@ export async function generateEmailsForLead(
   }
 
   const biz = shortName(lead.name);
-  const desc = shortBizDescription(lead.what_they_do_summary, lead.name);
+  const desc = shortBizDescription(lead.what_they_do_summary);
   const domain = lead.website ? lead.website.replace(/^https?:\/\/(www\.)?/, "").split("/")[0] : null;
 
-  const systemPrompt = `You are a senior B2B cold email copywriter. Your job is to write highly personalised outreach emails that feel like they were written by a human who genuinely researched this specific business — not a template with fields filled in.
+  const systemPrompt = `You are a senior B2B cold email copywriter.
 
-Critical rules:
-- NEVER copy the offer description word for word. Use it only to understand what we sell, then rewrite naturally.
-- NEVER use ALL CAPS in the email text.
-- NEVER use generic openers like "I hope this finds you well", "My name is X", or "I came across your business".
-- The first sentence must reference something SPECIFIC about what this business does.
-- Connect our service to a real, concrete pain point this type of business likely faces — based on what they actually do.
-- Write as if you know their world. Sound like a peer, not a salesperson.
-- Keep it conversational, warm, and direct.
-- Return ONLY valid JSON. No explanation, no preamble, no markdown.`;
+Write cold outreach that follows modern deliverability-first standards:
+- Plain-text only. No HTML, no markdown, no bullets inside the email body.
+- Short, human, and conversational. These should feel like one-to-one emails, not campaigns.
+- Never invent or use a personal first name. We do not know the recipient's first name.
+- If you greet them, use the company naturally, for example "Hi ${biz} team,". Never use the full long business name if it sounds clumsy.
+- Never use placeholders like [First Name], [Company], or {{name}}.
+- Never use generic openers like "I hope you are well", "My name is", or "I came across your business".
+- The opening line must reference something specific about what the company does.
+- Do not copy the offer description verbatim. Rewrite it naturally in simple language.
+- One clear CTA only.
+- No hype, no exaggerated claims, no ALL CAPS, no emojis, no heavy punctuation.
+- Subjects should be short and natural, usually 2 to 6 words.
+- Return only valid JSON with the required fields.`;
 
-  const userPrompt = `You are writing cold outreach emails on behalf of our company to this specific prospect.
+  const userPrompt = `Write 3 cold emails for this prospect.
 
---- ABOUT THE PROSPECT ---
-Business name: ${biz}
-Website: ${domain ?? "not listed"}
-What they do: ${desc}
-Location: ${lead.location_text ?? "unknown"}
+Prospect:
+- Company short name: ${biz}
+- Website: ${domain ?? "not listed"}
+- What they do: ${desc}
+- Location: ${lead.location_text ?? "unknown"}
 
---- WHAT WE SELL (use this as context only — do NOT copy this text into emails) ---
-We offer: ${offer.offer_summary}
-The problem we solve for businesses like theirs: ${offer.target_problem}
-The result they get: ${offer.key_outcome}
-How we want to end the email: ${offer.call_to_action}
+Offer context:
+- What we offer: ${offer.offer_summary}
+- Problem we solve: ${offer.target_problem}
+- Outcome we help create: ${offer.key_outcome}
+- CTA to use as the base close: ${offer.call_to_action}
 
---- YOUR TASK ---
-Write 3 emails specifically for ${biz}, a business that does: "${desc}".
+Required style:
+- Plain text only.
+- Personal and specific to this business type.
+- Use company-level language because we do not know a person's first name.
+- Keep the opener around 60 to 110 words.
+- Keep follow-up 1 around 35 to 60 words.
+- Keep follow-up 2 around 25 to 45 words.
+- No links unless they are already implied by the CTA text.
+- No list formatting.
 
-Think about: what specific daily frustrations or operational bottlenecks does a business like ${biz} likely face? How does our service solve exactly that for them? Write emails that make them feel like we understand their world.
+Email requirements:
+1. Opener
+- Subject: short, natural, non-salesy.
+- Body: specific observation -> likely pain point -> simple value -> CTA.
 
-Email 1 — Opener:
-- Subject: 6-8 words, curiosity-driven, specific to their industry (no generic subjects)
-- Body: 110-140 words
-- Line 1: a specific observation about what ${biz} does — something that shows you know their business
-- Line 2-3: connect that observation to a specific pain or inefficiency businesses like theirs typically face
-- Line 4-5: introduce how we solve exactly that, in plain English (rewrite our offer in your own words, tailored to them)
-- Close: natural CTA
+2. Follow-up 1
+- Subject: can be a light reply-thread style.
+- Body: one new angle relevant to their business and a soft CTA.
 
-Email 2 — Follow-up 1:
-- Subject: feels like a reply thread (e.g. "Re: ..." or a new angle)
-- Body: 65-80 words
-- Add one new angle or specific example relevant to their type of business
-- Soft CTA
+3. Follow-up 2
+- Subject: brief final nudge.
+- Body: very short, respectful, warm close.
 
-Email 3 — Follow-up 2:
-- Subject: brief, final-touch tone
-- Body: 45-60 words
-- Very brief. Acknowledge they're busy. One last hook specific to their business type. Warm close.
-
-Return ONLY this JSON:
+Return only this JSON:
 {
   "opener_subject": "...",
   "opener_body": "...",
@@ -210,7 +202,7 @@ Return ONLY this JSON:
       },
       body: JSON.stringify({
         model: env.mistralModel,
-        temperature: 0.75,
+        temperature: 0.65,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: systemPrompt },
@@ -230,19 +222,16 @@ Return ONLY this JSON:
 
     const content = data.choices?.[0]?.message?.content ?? "";
     const parsed = parseEmailJson(content);
-
     if (parsed) return parsed;
 
     console.warn(`[outreach] JSON parse failed for lead ${lead.id}, using fallback. Raw: ${content.slice(0, 200)}`);
     return fallbackEmails(lead, offer);
-
   } catch (err) {
     console.warn(`[outreach] Generation error for lead ${lead.id}:`, err);
     return fallbackEmails(lead, offer);
   }
 }
 
-// Run generations with concurrency limit
 export async function generateEmailsForLeads(
   leads: LeadForOutreach[],
   offer: OfferForOutreach,
@@ -252,10 +241,8 @@ export async function generateEmailsForLeads(
 
   for (let i = 0; i < leads.length; i += concurrency) {
     const batch = leads.slice(i, i + concurrency);
-    const settled = await Promise.allSettled(
-      batch.map((lead) => generateEmailsForLead(lead, offer))
-    );
-    for (let j = 0; j < batch.length; j++) {
+    const settled = await Promise.allSettled(batch.map((lead) => generateEmailsForLead(lead, offer)));
+    for (let j = 0; j < batch.length; j += 1) {
       const result = settled[j];
       results.push({
         lead: batch[j],

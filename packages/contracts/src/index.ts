@@ -94,6 +94,7 @@ export const createOfferRequestSchema = z.object({
   keyOutcome: z.string().min(1),
   callToAction: z.string().min(1)
 });
+export const updateOfferRequestSchema = createOfferRequestSchema;
 
 export const offerSchema = z.object({
   id: z.string().uuid(),
@@ -107,6 +108,7 @@ export const offerSchema = z.object({
 });
 
 export type CreateOfferRequest = z.infer<typeof createOfferRequestSchema>;
+export type UpdateOfferRequest = z.infer<typeof updateOfferRequestSchema>;
 export type Offer = z.infer<typeof offerSchema>;
 
 // ── Outreach ──────────────────────────────────────────────────────────────────

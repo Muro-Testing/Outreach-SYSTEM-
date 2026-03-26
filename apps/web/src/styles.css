@@ -775,8 +775,9 @@ tbody tr.row-selected .lead-name-col {
 .offer-card-top {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   margin-bottom: 0.5rem;
+  gap: 0.75rem;
 }
 
 .offer-card-check {
@@ -794,6 +795,19 @@ tbody tr.row-selected .lead-name-col {
   transition: opacity 120ms;
 }
 .offer-card-selected .offer-card-check { opacity: 1; }
+
+.offer-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.offer-card-actions .btn-clear,
+.offer-card-actions .btn-purple {
+  padding: 0.28rem 0.55rem;
+  font-size: 0.74rem;
+  min-height: auto;
+}
 
 .offer-card-remove {
   border: none;

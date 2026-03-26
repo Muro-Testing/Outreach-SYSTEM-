@@ -51,6 +51,16 @@ type OfferFields = {
   keyOutcome: string; callToAction: string;
 };
 
+function mapOfferToFields(offer: Offer): OfferFields {
+  return {
+    offerName: offer.offer_name,
+    offerSummary: offer.offer_summary,
+    targetProblem: offer.target_problem,
+    keyOutcome: offer.key_outcome,
+    callToAction: offer.call_to_action
+  };
+}
+
 export function App() {
   // Ã¢â€â‚¬Ã¢â€â‚¬ Collection state Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -86,6 +96,7 @@ export function App() {
   const [offerLoading, setOfferLoading] = useState(false);
   const [offerError, setOfferError] = useState("");
   const [showOfferForm, setShowOfferForm] = useState(false);
+  const [editingOfferId, setEditingOfferId] = useState<string | null>(null);
   const [offerMode, setOfferMode] = useState<"manual" | "ai">("manual");
   const [aiIdeaText, setAiIdeaText] = useState("");
   const [aiDrafting, setAiDrafting] = useState(false);
@@ -384,14 +395,42 @@ export function App() {
   async function onSaveOffer(e: FormEvent) {
     e.preventDefault(); setOfferLoading(true); setOfferError("");
     try {
-      const created = await api<Offer>("/api/offers", { method: "POST", body: JSON.stringify(offerForm) });
-      setOffers(prev => [created, ...prev]);
-      setSelectedOfferId(created.id);
+      const saved = editingOfferId
+        ? await api<Offer>(`/api/offers/${editingOfferId}`, { method: "PATCH", body: JSON.stringify(offerForm) })
+        : await api<Offer>("/api/offers", { method: "POST", body: JSON.stringify(offerForm) });
+      setOffers(prev => editingOfferId
+        ? prev.map((offer) => offer.id === editingOfferId ? saved : offer)
+        : [saved, ...prev]);
+      setSelectedOfferId(saved.id);
+      setEditingOfferId(null);
       setOfferForm({ offerName: "", offerSummary: "", targetProblem: "", keyOutcome: "", callToAction: "" });
       setAiIdeaText(""); setAiRefined(false); setRefinementNote("");
       setShowOfferForm(false);
     } catch (err) { setOfferError(err instanceof Error ? err.message : "Failed to save offer"); }
     finally { setOfferLoading(false); }
+  }
+
+  function onEditOffer(offer: Offer, mode: "manual" | "ai" = "manual") {
+    setSelectedOfferId(offer.id);
+    setEditingOfferId(offer.id);
+    setOfferForm(mapOfferToFields(offer));
+    setOfferMode(mode);
+    setShowOfferForm(true);
+    setOfferError("");
+    setAiIdeaText("");
+    setRefinementNote("");
+    setAiRefined(mode === "ai");
+  }
+
+  function onCancelOfferForm() {
+    setShowOfferForm(false);
+    setEditingOfferId(null);
+    setOfferMode("manual");
+    setOfferError("");
+    setAiIdeaText("");
+    setAiRefined(false);
+    setRefinementNote("");
+    setOfferForm({ offerName: "", offerSummary: "", targetProblem: "", keyOutcome: "", callToAction: "" });
   }
 
   async function onDeleteOffer(id: string) {
@@ -951,8 +990,21 @@ export function App() {
               <h2>Offer Library</h2>
               <p className="run-hint">Save your offer once, then reuse it across any lead list.</p>
             </div>
-            <button className="btn-purple" type="button" onClick={() => { setShowOfferForm(v => !v); setOfferMode("manual"); setAiRefined(false); }}>
-              {showOfferForm ? "Cancel" : "+ New Offer"}
+            <button className="btn-purple" type="button" onClick={() => {
+              if (showOfferForm && !editingOfferId) {
+                onCancelOfferForm();
+                return;
+              }
+              setShowOfferForm(true);
+              setEditingOfferId(null);
+              setOfferMode("manual");
+              setOfferError("");
+              setAiIdeaText("");
+              setAiRefined(false);
+              setRefinementNote("");
+              setOfferForm({ offerName: "", offerSummary: "", targetProblem: "", keyOutcome: "", callToAction: "" });
+            }}>
+              {showOfferForm && !editingOfferId ? "Cancel" : "+ New Offer"}
             </button>
           </div>
 
@@ -990,7 +1042,7 @@ export function App() {
               {(offerMode === "manual" || aiRefined) && (
                 <form onSubmit={onSaveOffer}>
                   {offerMode === "ai" && aiRefined && (
-                    <div className="ai-drafted-banner">AI-drafted - review and edit before saving</div>
+                    <div className="ai-drafted-banner">{editingOfferId ? "AI refine mode - update the saved offer" : "AI-drafted - review and edit before saving"}</div>
                   )}
                   <div className="offer-form-grid" style={{ marginTop: "0.75rem" }}>
                     <label className="offer-form-full">Offer name
@@ -1026,9 +1078,14 @@ export function App() {
                   )}
 
                   {offerError && <p className="error">{offerError}</p>}
-                  <button className="btn-purple" disabled={offerLoading} type="submit" style={{ marginTop: "0.75rem" }}>
-                    {offerLoading ? "Saving..." : "Save Offer"}
-                  </button>
+                  <div className="toolbar-actions" style={{ marginTop: "0.75rem" }}>
+                    <button className="btn-purple" disabled={offerLoading} type="submit">
+                      {offerLoading ? "Saving..." : editingOfferId ? "Update Offer" : "Save Offer"}
+                    </button>
+                    <button className="btn-clear" type="button" onClick={onCancelOfferForm}>
+                      Cancel
+                    </button>
+                  </div>
                 </form>
               )}
             </div>
@@ -1043,8 +1100,14 @@ export function App() {
                     onKeyDown={e => e.key === "Enter" && setSelectedOfferId(offer.id)}>
                     <div className="offer-card-top">
                       <div className="offer-card-check">{sel ? "Selected" : ""}</div>
-                      <button className="offer-card-remove" type="button"
-                        onClick={e => { e.stopPropagation(); void onDeleteOffer(offer.id); }}>x</button>
+                      <div className="offer-card-actions">
+                        <button className="btn-clear" type="button"
+                          onClick={e => { e.stopPropagation(); onEditOffer(offer, "manual"); }}>Edit</button>
+                        <button className="btn-purple" type="button"
+                          onClick={e => { e.stopPropagation(); onEditOffer(offer, "ai"); }}>AI Refine</button>
+                        <button className="offer-card-remove" type="button"
+                          onClick={e => { e.stopPropagation(); void onDeleteOffer(offer.id); }}>x</button>
+                      </div>
                     </div>
                     <div className="offer-card-name">{offer.offer_name}</div>
                     <div className="offer-card-summary">{offer.offer_summary}</div>
