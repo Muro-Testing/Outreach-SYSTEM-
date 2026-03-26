@@ -54,7 +54,8 @@ export const runSourcesSchema = z.object({
 
 export const runCampaignRequestSchema = z.object({
   sources: runSourcesSchema.optional(),
-  targetLeads: z.number().int().min(1).max(500).optional()
+  targetLeads: z.number().int().min(1).max(500).optional(),
+  force: z.boolean().optional()
 });
 
 export const listLeadsQuerySchema = z.object({
@@ -97,10 +98,13 @@ export type Offer = z.infer<typeof offerSchema>;
 
 // ── Outreach ──────────────────────────────────────────────────────────────────
 
-export const generateOutreachRequestSchema = z.object({
-  campaignId: z.string().uuid(),
-  offerId: z.string().uuid()
-});
+export const generateOutreachRequestSchema = z
+  .object({
+    campaignId: z.string().uuid().optional(),
+    listId: z.string().uuid().optional(),
+    offerId: z.string().uuid()
+  })
+  .refine((d) => d.campaignId || d.listId, { message: "campaignId or listId required" });
 
 export const outreachRowSchema = z.object({
   lead_id: z.string().uuid(),
@@ -121,3 +125,36 @@ export const outreachRowSchema = z.object({
 export type GenerateOutreachRequest = z.infer<typeof generateOutreachRequestSchema>;
 export type OutreachRow = z.infer<typeof outreachRowSchema>;
 
+// ── Outreach Lists ─────────────────────────────────────────────────────────────
+
+export const outreachListSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  lead_count: z.number(),
+  created_at: z.string()
+});
+export type OutreachList = z.infer<typeof outreachListSchema>;
+
+export const createOutreachListSchema = z.object({
+  name: z.string().min(1),
+  leadIds: z.array(z.string().uuid()).optional()
+});
+export type CreateOutreachListRequest = z.infer<typeof createOutreachListSchema>;
+
+// ── AI Offer Builder ───────────────────────────────────────────────────────────
+
+export const aiDraftOfferRequestSchema = z.object({
+  userIdea: z.string().min(10)
+});
+export const aiRefineOfferRequestSchema = z.object({
+  currentFields: z.object({
+    offerName: z.string(),
+    offerSummary: z.string(),
+    targetProblem: z.string(),
+    keyOutcome: z.string(),
+    callToAction: z.string()
+  }),
+  refinementNote: z.string().min(3)
+});
+export type AiDraftOfferRequest = z.infer<typeof aiDraftOfferRequestSchema>;
+export type AiRefineOfferRequest = z.infer<typeof aiRefineOfferRequestSchema>;

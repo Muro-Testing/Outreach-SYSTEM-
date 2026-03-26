@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { createCampaignRequestSchema, runCampaignRequestSchema } from "@outreach/contracts";
 import { supabase } from "../db.js";
-import { executeCollectionRun } from "../services/collection.js";
+import { executeCollectionRun, buildQueryFingerprint } from "../services/collection.js";
 
 export const campaignsRouter = Router();
 
@@ -83,6 +83,30 @@ campaignsRouter.post("/:id/run", async (req, res) => {
     .single();
 
   if (campaign.error || !campaign.data) return res.status(404).json({ error: "Campaign not found" });
+
+  const force = Boolean(runBody.data.force);
+  if (!force) {
+    const fingerprint = buildQueryFingerprint(campaign.data.niche_keywords, campaign.data.location_scope);
+    const existing = await supabase
+      .from("collection_runs")
+      .select("id, campaign_id, inserted_count, updated_count, completed_at")
+      .eq("query_fingerprint", fingerprint)
+      .eq("status", "completed")
+      .order("completed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existing.data) {
+      const leadCount = (existing.data.inserted_count ?? 0) + (existing.data.updated_count ?? 0);
+      return res.status(409).json({
+        duplicate: true,
+        existingRunId: existing.data.id,
+        existingCampaignId: existing.data.campaign_id,
+        leadCount,
+        completedAt: existing.data.completed_at
+      });
+    }
+  }
 
   const run = await supabase
     .from("collection_runs")

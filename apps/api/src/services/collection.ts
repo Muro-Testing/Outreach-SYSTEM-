@@ -8,6 +8,12 @@ import { normalizeRawLead, payloadHash } from "./normalize.js";
 import { enrichBusinessFromWebsite } from "./enrich.js";
 import type { NormalizedLead, RawLead, RunCounters, SourceName } from "../types.js";
 
+export function buildQueryFingerprint(keywords: string[], location: string): string {
+  const sorted = [...keywords].map(k => k.toLowerCase().trim()).sort().join("|");
+  const loc = location.toLowerCase().trim();
+  return `${sorted}::${loc}`;
+}
+
 type CampaignRow = {
   id: string;
   niche_keywords: string[];
@@ -158,6 +164,9 @@ export async function executeCollectionRun(
     .from("collection_runs")
     .update({ status: "running", started_at: new Date().toISOString() })
     .eq("id", runId);
+
+  const fingerprint = buildQueryFingerprint(campaign.niche_keywords, campaign.location_scope);
+  await supabase.from("collection_runs").update({ query_fingerprint: fingerprint }).eq("id", runId);
 
   const selectedSources = Object.entries(sources)
     .filter(([, enabled]) => enabled)

@@ -8,6 +8,7 @@ import { leadsRouter } from "./routes/leads.js";
 import { runsRouter } from "./routes/runs.js";
 import { offersRouter } from "./routes/offers.js";
 import { outreachRouter } from "./routes/outreach.js";
+import { outreachListsRouter } from "./routes/outreach-lists.js";
 
 const exec = promisify(execCallback);
 
@@ -30,6 +31,7 @@ app.use("/api/runs", runsRouter);
 app.use("/api/leads", leadsRouter);
 app.use("/api/offers", offersRouter);
 app.use("/api/outreach", outreachRouter);
+app.use("/api/outreach-lists", outreachListsRouter);
 
 async function freeConfiguredPort(port: number): Promise<void> {
   if (process.platform !== "win32") return;

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { generateOutreachRequestSchema } from "@outreach/contracts";
+import { z } from "zod";
 import { supabase } from "../db.js";
 import { generateEmailsForLeads } from "../services/outreach.js";
 import type { LeadForOutreach, OfferForOutreach } from "../services/outreach.js";
@@ -7,14 +7,22 @@ import { env } from "../env.js";
 
 export const outreachRouter = Router();
 
+const generateOutreachRequestSchema = z
+  .object({
+    campaignId: z.string().uuid().optional(),
+    listId: z.string().uuid().optional(),
+    offerId: z.string().uuid()
+  })
+  .refine((d) => d.campaignId || d.listId, { message: "campaignId or listId required" });
+
 // POST /api/outreach/generate
-// Generates emails for all leads in a campaign using a saved offer.
+// Generates emails for all leads in a campaign (or outreach list) using a saved offer.
 // Upserts into lead_outreach (unique on lead_id + offer_id).
 outreachRouter.post("/generate", async (req, res) => {
   const parsed = generateOutreachRequestSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const { campaignId, offerId } = parsed.data;
+  const { campaignId, listId, offerId } = parsed.data;
 
   // Fetch offer
   const offerResult = await supabase
@@ -29,17 +37,24 @@ outreachRouter.post("/generate", async (req, res) => {
 
   const offer: OfferForOutreach = offerResult.data;
 
-  // Fetch all leads for campaign
-  const leadsResult = await supabase
-    .from("leads")
-    .select("id,name,email,phone,website,location_text,what_they_do_summary")
-    .eq("campaign_id", campaignId);
+  // Fetch leads — either via listId (junction table) or campaignId (direct)
+  let leads: LeadForOutreach[] = [];
 
-  if (leadsResult.error) {
-    return res.status(500).json({ error: leadsResult.error.message });
+  if (listId) {
+    const { data: listLeads, error: listError } = await supabase
+      .from("outreach_list_leads")
+      .select("leads(id, name, email, phone, website, location_text, what_they_do_summary)")
+      .eq("list_id", listId);
+    if (listError) return res.status(500).json({ error: listError.message });
+    leads = (listLeads ?? []).map((r: any) => r.leads).filter(Boolean);
+  } else {
+    const leadsResult = await supabase
+      .from("leads")
+      .select("id,name,email,phone,website,location_text,what_they_do_summary")
+      .eq("campaign_id", campaignId);
+    if (leadsResult.error) return res.status(500).json({ error: leadsResult.error.message });
+    leads = leadsResult.data ?? [];
   }
-
-  const leads: LeadForOutreach[] = leadsResult.data ?? [];
 
   if (leads.length === 0) {
     return res.json({ generated: 0, rows: [] });
@@ -86,16 +101,75 @@ outreachRouter.post("/generate", async (req, res) => {
   return res.json({ generated: rows.length, rows });
 });
 
-// GET /api/outreach?campaignId=...&offerId=...
+// GET /api/outreach?campaignId=...&offerId=... (or listId instead of campaignId)
 // Returns saved outreach rows for export.
 outreachRouter.get("/", async (req, res) => {
-  const { campaignId, offerId } = req.query as { campaignId?: string; offerId?: string };
+  const { campaignId, listId, offerId } = req.query as {
+    campaignId?: string;
+    listId?: string;
+    offerId?: string;
+  };
 
-  if (!campaignId || !offerId) {
-    return res.status(400).json({ error: "campaignId and offerId are required" });
+  if (!offerId) {
+    return res.status(400).json({ error: "offerId is required" });
+  }
+  if (!campaignId && !listId) {
+    return res.status(400).json({ error: "campaignId or listId is required" });
   }
 
-  // Join lead_outreach with leads to get contact fields
+  if (listId) {
+    // Get lead IDs from the junction table, then fetch outreach rows for those leads
+    const { data: listLeads, error: listError } = await supabase
+      .from("outreach_list_leads")
+      .select("lead_id")
+      .eq("list_id", listId);
+    if (listError) return res.status(500).json({ error: listError.message });
+
+    const leadIds = (listLeads ?? []).map((r: any) => r.lead_id);
+    if (leadIds.length === 0) return res.json([]);
+
+    const result = await supabase
+      .from("lead_outreach")
+      .select(`
+        lead_id,
+        offer_id,
+        opener_subject,
+        opener_body,
+        followup1_subject,
+        followup1_body,
+        followup2_subject,
+        followup2_body,
+        generated_at,
+        leads!inner(id,name,email,phone,website,location_text)
+      `)
+      .eq("offer_id", offerId)
+      .in("lead_id", leadIds);
+
+    if (result.error) return res.status(500).json({ error: result.error.message });
+
+    const rows = (result.data ?? []).map((row: Record<string, unknown>) => {
+      const lead = row.leads as Record<string, unknown>;
+      return {
+        lead_id: row.lead_id,
+        offer_id: row.offer_id,
+        name: lead?.name ?? "",
+        email: lead?.email ?? null,
+        phone: lead?.phone ?? null,
+        website: lead?.website ?? null,
+        location_text: lead?.location_text ?? null,
+        opener_subject: row.opener_subject,
+        opener_body: row.opener_body,
+        followup1_subject: row.followup1_subject,
+        followup1_body: row.followup1_body,
+        followup2_subject: row.followup2_subject,
+        followup2_body: row.followup2_body
+      };
+    });
+
+    return res.json(rows);
+  }
+
+  // campaignId path — existing logic unchanged
   const result = await supabase
     .from("lead_outreach")
     .select(`

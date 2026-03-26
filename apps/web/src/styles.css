@@ -850,6 +850,114 @@ th:nth-child(6), td:nth-child(6) { width: 14%; overflow-wrap: anywhere; word-bre
 /* ── Error ───────────────────────────────────────────────────────────────────── */
 .error { color: var(--red); font-size: 0.88rem; margin-top: 0.5rem; }
 
+/* ── Lead row selection ──────────────────────────────────────────────────────── */
+.row-selected { background: #f0f4ff !important; }
+tbody tr.row-selected:hover { background: #e8eeff !important; }
+
+/* ── Duplicate Warning Modal ─────────────────────────────────────────────────── */
+.modal-warning { max-width: 480px; }
+.dupe-info-box {
+  display: flex; gap: 1rem; align-items: flex-start;
+  background: #fff8e1; border: 1.5px solid #ffe082;
+  border-radius: 12px; padding: 1rem 1.1rem;
+}
+.dupe-icon { font-size: 1.8rem; flex-shrink: 0; }
+.dupe-info-box strong { font-size: 0.97rem; color: var(--text-main); display: block; margin-bottom: 0.3rem; }
+.dupe-info-box p { margin: 0.25rem 0 0; font-size: 0.86rem; color: var(--text-soft); }
+.dupe-actions { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+
+/* ── Outreach List Modal ─────────────────────────────────────────────────────── */
+.modal-list { max-width: 520px; }
+.list-modal-section { display: grid; gap: 0.6rem; }
+.list-modal-label {
+  font-size: 0.78rem; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--text-soft);
+}
+.list-modal-create-row { display: flex; gap: 0.6rem; }
+.list-modal-create-row input { flex: 1; }
+.list-modal-existing { display: grid; gap: 0.4rem; }
+.list-existing-item {
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 0.65rem 0.9rem; border: 1.5px solid var(--line);
+  border-radius: 10px; background: #fff; cursor: pointer;
+  text-align: left; transition: border-color 100ms, background 100ms;
+}
+.list-existing-item:hover { border-color: var(--purple); background: var(--purple-soft); }
+.list-existing-name { flex: 1; font-weight: 600; font-size: 0.9rem; color: var(--text-main); }
+.list-existing-count { font-size: 0.78rem; color: var(--text-muted); }
+.list-existing-add {
+  font-size: 0.78rem; font-weight: 800; color: var(--purple);
+  background: var(--purple-soft); padding: 0.2rem 0.55rem; border-radius: 6px;
+}
+
+/* ── Outreach Lists chips ─────────────────────────────────────────────────────── */
+.outreach-lists-row {
+  display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.5rem 0 0.75rem;
+}
+.outreach-list-chip {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  background: var(--green-soft); border: 1.5px solid rgba(66,183,42,0.25);
+  border-radius: 999px; padding: 0.3rem 0.5rem 0.3rem 0.8rem;
+  font-size: 0.82rem; font-weight: 600; color: #155724;
+}
+.outreach-list-chip-count {
+  background: rgba(66,183,42,0.2); border-radius: 999px;
+  padding: 0.1rem 0.45rem; font-size: 0.72rem; font-weight: 800;
+}
+.outreach-list-chip button {
+  border: none; background: none; cursor: pointer; color: #36a420;
+  font-size: 0.8rem; padding: 0 0.2rem; line-height: 1;
+  transition: color 100ms;
+}
+.outreach-list-chip button:hover { color: var(--red); }
+
+/* ── Source mode toggle (campaign vs list) ───────────────────────────────────── */
+.source-mode-toggle {
+  display: inline-flex; gap: 0; margin-bottom: 0.75rem;
+  border: 1.5px solid var(--line); border-radius: 10px; overflow: hidden; background: #f7f8fa;
+}
+.source-mode-btn {
+  border: none; background: none; padding: 0.5rem 1.1rem;
+  font-size: 0.86rem; font-weight: 700; cursor: pointer;
+  color: var(--text-soft); transition: background 100ms, color 100ms;
+  display: flex; align-items: center; gap: 0.4rem;
+}
+.source-mode-btn:hover { background: #eff0f2; }
+.source-mode-active { background: #fff !important; color: var(--green-strong) !important; box-shadow: inset 0 0 0 1.5px rgba(66,183,42,0.35); border-radius: 8px; }
+.source-mode-badge {
+  background: var(--green); color: #fff; border-radius: 999px;
+  padding: 0.05rem 0.45rem; font-size: 0.7rem; font-weight: 800;
+}
+
+/* ── AI Offer Builder ────────────────────────────────────────────────────────── */
+.offer-mode-tabs {
+  display: flex; gap: 0.4rem; margin-bottom: 1rem;
+  border-bottom: 1.5px solid var(--line); padding-bottom: 0.75rem;
+}
+.offer-tab {
+  border: 1.5px solid var(--line); background: #fff; border-radius: 8px;
+  padding: 0.45rem 1rem; font-size: 0.86rem; font-weight: 700;
+  cursor: pointer; color: var(--text-soft); transition: all 100ms;
+}
+.offer-tab:hover { border-color: var(--purple); color: var(--purple); }
+.offer-tab-active {
+  border-color: var(--purple); background: var(--purple-soft);
+  color: var(--purple-strong);
+}
+.ai-idea-section { display: grid; gap: 0.75rem; }
+.ai-drafted-banner {
+  background: linear-gradient(90deg, var(--purple-soft), #fff);
+  border: 1.5px solid rgba(123,94,167,0.3); border-radius: 8px;
+  padding: 0.5rem 0.9rem; font-size: 0.82rem; font-weight: 700;
+  color: var(--purple-strong);
+}
+.refine-row {
+  display: flex; gap: 0.6rem; margin-top: 0.75rem;
+  background: rgba(123,94,167,0.05); border: 1.5px solid rgba(123,94,167,0.15);
+  border-radius: 10px; padding: 0.75rem;
+}
+.refine-row input { flex: 1; }
+
 /* ── Responsive ──────────────────────────────────────────────────────────────── */
 @media (max-width: 720px) {
   .layout { padding: 1rem 0.75rem 2rem; }
