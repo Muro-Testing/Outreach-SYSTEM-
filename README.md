@@ -108,14 +108,16 @@ Outreach-SYSTEM-/
 
 ## Requirements
 
-- Node.js 22+ recommended
-- npm
+- Node.js 22+ recommended for manual installs
+- npm for manual installs
+- Docker Desktop + Docker Compose for the recommended install path
 - Supabase project with SQL access
 - At least one source credential configured
 
 ## Environment Variables
 
 Copy `.env.example` to `.env`.
+Keep the file in plain `KEY=value` format with no spaces around `=`.
 
 Required for the app to function:
 - `SUPABASE_URL`
@@ -143,11 +145,15 @@ Runtime configuration:
 
 ## Database Setup
 
-Apply the initial schema first:
+Run these SQL files in Supabase in this exact order:
 - `supabase/migrations/20260313_phase1.sql`
-
-Apply the enrichment migration after that:
 - `supabase/migrations/202603131510_phase1_enrichment.sql`
+- `supabase/migrations/20260320_outreach.sql`
+- `supabase/migrations/20260326_campaign_archive_and_lead_keywords.sql`
+- `supabase/migrations/20260326_outreach_history.sql`
+- `supabase/migrations/20260326_outreach_lists.sql`
+- `supabase/migrations/20260326_query_fingerprint.sql`
+- `supabase/migrations/20260326_search_queries.sql`
 
 Main tables created by Phase 1:
 - `campaigns`
@@ -156,7 +162,38 @@ Main tables created by Phase 1:
 - `lead_sources`
 - `run_errors`
 
-## Install
+## Recommended Install: Docker Compose
+
+This is the easiest way to send the app to another person.
+
+### Friend Setup Checklist
+
+1. Create a free Supabase project at https://supabase.com
+2. In Supabase, copy:
+   - Project URL -> `SUPABASE_URL`
+   - Service role key -> `SUPABASE_SERVICE_ROLE_KEY`
+3. Create a `.env` file from `.env.example`
+4. Add the minimum required keys:
+   - `SUPABASE_URL`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+   - `GOOGLE_MAPS_API_KEY`
+   - `MISTRAL_API_KEY`
+5. Run every SQL migration listed in the `Database Setup` section inside the Supabase SQL editor
+6. Start the app:
+
+```bash
+docker compose up --build
+```
+
+After startup:
+- Web app: `http://localhost:5173`
+- API health: `http://localhost:8787/health`
+
+The Docker setup keeps Supabase external. Docker runs only the app services.
+
+## Manual Install
+
+If you do not want Docker, the existing manual path still works.
 
 ```bash
 npm install
@@ -189,6 +226,36 @@ Web:
 ```bash
 npm run dev:web
 ```
+
+## Docker Troubleshooting
+
+### The containers start but the app cannot load campaigns or leads
+
+Check:
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- all migrations were applied in Supabase
+
+### The web app loads but API calls fail
+
+Check:
+- `http://localhost:8787/health`
+- Docker Compose logs for the `api` service
+- required keys exist in `.env`
+
+### The API container starts but Google or Mistral features fail
+
+Check:
+- `GOOGLE_MAPS_API_KEY`
+- `MISTRAL_API_KEY`
+- any provider-specific billing, model, or permission issues
+
+### Browser shows CORS or bad API base URL issues
+
+The Docker web container proxies `/api` and `/health` to the API container. If you changed ports or hostnames, update:
+- `docker-compose.yml`
+- `apps/web/nginx.conf`
+- `CORS_ORIGIN` in `.env` if needed
 
 ## Build
 
@@ -316,7 +383,9 @@ Not yet included:
 ## Developer Notes
 
 - The API and web app both consume the same shared contract package.
-- The web app talks to the API via `VITE_API_BASE_URL`, defaulting to `http://localhost:8790` only if overridden in local env/build tooling.
+- The web app talks to the API via `VITE_API_BASE_URL`, defaulting to `/api`.
+- Local Vite dev proxies `/api` and `/health` to `http://localhost:8787`.
+- Docker Compose serves the frontend through nginx and proxies API traffic to the API container.
 - The committed project also includes generated `.js` files alongside `.ts/.tsx` source in the web app.
 
 ## Current Status

@@ -1,0 +1,21 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file:
+      - .env
+    environment:
+      PORT: 8787
+      CORS_ORIGIN: http://localhost:5173
+    ports:
+      - "8787:8787"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    depends_on:
+      - api
+    ports:
+      - "5173:80"

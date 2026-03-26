@@ -1,0 +1,60 @@
+{
+    "task":  "docker-install",
+    "timestamp":  "2026-03-26T16:09:15.1140579+00:00",
+    "inputs":  {
+                   "composeFile":  "docker-compose.yml",
+                   "envMode":  "temporary-sanitized",
+                   "ports":  {
+                                 "web":  5173,
+                                 "api":  8787
+                             }
+               },
+    "processed":  {
+                      "webStatus":  200,
+                      "composeServices":  [
+                                              {
+                                                  "service":  "api",
+                                                  "publishers":  [
+                                                                     {
+                                                                         "URL":  "0.0.0.0",
+                                                                         "TargetPort":  8787,
+                                                                         "PublishedPort":  8787,
+                                                                         "Protocol":  "tcp"
+                                                                     },
+                                                                     {
+                                                                         "URL":  "::",
+                                                                         "TargetPort":  8787,
+                                                                         "PublishedPort":  8787,
+                                                                         "Protocol":  "tcp"
+                                                                     }
+                                                                 ],
+                                                  "state":  "running"
+                                              },
+                                              {
+                                                  "service":  "web",
+                                                  "publishers":  [
+                                                                     {
+                                                                         "URL":  "0.0.0.0",
+                                                                         "TargetPort":  80,
+                                                                         "PublishedPort":  5173,
+                                                                         "Protocol":  "tcp"
+                                                                     },
+                                                                     {
+                                                                         "URL":  "::",
+                                                                         "TargetPort":  80,
+                                                                         "PublishedPort":  5173,
+                                                                         "Protocol":  "tcp"
+                                                                     }
+                                                                 ],
+                                                  "state":  "running"
+                                              }
+                                          ],
+                      "apiHealth":  {
+                                        "ok":  true
+                                    }
+                  },
+    "success":  true,
+    "errors":  [
+
+               ]
+}
