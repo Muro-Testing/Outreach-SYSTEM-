@@ -1431,3 +1431,20 @@ tbody tr.row-selected:hover { background: #e8eeff !important; }
   .source-mode-btn,
   .lead-view-btn { flex: 1; justify-content: center; }
 }
+
+/* Refine panel */
+.refine-panel { margin-top: 0.75rem; }
+.refine-form { display: flex; flex-direction: column; gap: 0.5rem; }
+.refine-instructions {
+  width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border);
+  border-radius: 8px; font-size: 0.85rem; resize: vertical;
+  background: var(--bg); color: var(--text); font-family: inherit;
+}
+.refine-instructions:focus { outline: none; border-color: #7b5ea7; }
+.refine-actions { display: flex; gap: 0.5rem; align-items: center; }
+
+/* Refine progress bar */
+.refine-progress { display: flex; flex-direction: column; gap: 0.3rem; }
+.refine-progress-bar { height: 6px; background: var(--border); border-radius: 99px; overflow: hidden; }
+.refine-progress-fill { height: 100%; background: #7b5ea7; border-radius: 99px; transition: width 0.3s ease; }
+.refine-progress-label { font-size: 0.78rem; color: var(--text-muted); }

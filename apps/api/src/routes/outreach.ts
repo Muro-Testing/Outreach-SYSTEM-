@@ -2,8 +2,8 @@ import { Router } from "express";
 import { z } from "zod";
 import * as XLSX from "xlsx";
 import { supabase } from "../db.js";
-import { generateEmailsForLeads, getOutreachModelLabel } from "../services/outreach.js";
-import type { LeadForOutreach, OfferForOutreach } from "../services/outreach.js";
+import { generateEmailsForLeads, refineEmailsForLeads, getOutreachModelLabel } from "../services/outreach.js";
+import type { LeadForOutreach, OfferForOutreach, GeneratedEmails } from "../services/outreach.js";
 
 export const outreachRouter = Router();
 
@@ -361,6 +361,190 @@ outreachRouter.post("/export-webhook", async (req, res) => {
   } catch (error) {
     return res.status(500).json({ error: error instanceof Error ? error.message : "Failed to send webhook" });
   }
+});
+
+const refineRequestSchema = z.object({
+  instructions: z.string().max(1000).optional(),
+  model: z.enum(["default", "large", "medium", "small"]).optional()
+});
+
+outreachRouter.post("/refine/:historyId", async (req, res) => {
+  const historyId = req.params.historyId;
+  const parsed = refineRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+  const { instructions, model } = parsed.data;
+  const modelVersion = `refined:${getOutreachModelLabel(model)}`;
+
+  // Load original generation header
+  const genResult = await supabase
+    .from("outreach_generations")
+    .select("id,source_type,campaign_id,list_id,offer_id")
+    .eq("id", historyId)
+    .single();
+
+  if (genResult.error || !genResult.data) {
+    return res.status(404).json({ error: "History entry not found" });
+  }
+  const orig = genResult.data as {
+    id: string; source_type: string; campaign_id: string | null;
+    list_id: string | null; offer_id: string;
+  };
+
+  // Load original rows + lead info
+  const rowsResult = await supabase
+    .from("outreach_generation_rows")
+    .select(`
+      lead_id, name, email, phone, website, location_text,
+      opener_subject, opener_body,
+      followup1_subject, followup1_body,
+      followup2_subject, followup2_body,
+      leads!inner(what_they_do_summary)
+    `)
+    .eq("generation_id", historyId);
+
+  if (rowsResult.error) {
+    return res.status(500).json({ error: rowsResult.error.message });
+  }
+
+  const offer = await fetchOffer(orig.offer_id);
+  if (!offer) {
+    return res.status(404).json({ error: "Offer not found" });
+  }
+
+  const leadsWithEmails = (rowsResult.data ?? []).map((row: any) => ({
+    id: row.lead_id as string,
+    name: String(row.name ?? ""),
+    email: (row.email as string | null) ?? null,
+    phone: (row.phone as string | null) ?? null,
+    website: (row.website as string | null) ?? null,
+    location_text: (row.location_text as string | null) ?? null,
+    what_they_do_summary: (row.leads?.what_they_do_summary as string | null) ?? null,
+    existingEmails: {
+      opener_subject: String(row.opener_subject ?? ""),
+      opener_body: String(row.opener_body ?? ""),
+      followup1_subject: String(row.followup1_subject ?? ""),
+      followup1_body: String(row.followup1_body ?? ""),
+      followup2_subject: String(row.followup2_subject ?? ""),
+      followup2_body: String(row.followup2_body ?? "")
+    } as GeneratedEmails
+  }));
+
+  if (leadsWithEmails.length === 0) {
+    return res.status(400).json({ error: "No rows found for this history entry" });
+  }
+
+  // Stream progress via SSE
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+
+  const sendEvent = (data: object) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  sendEvent({ type: "start", total: leadsWithEmails.length });
+
+  let refined: Array<{ lead: LeadForOutreach; emails: GeneratedEmails }>;
+  try {
+    refined = await refineEmailsForLeads(leadsWithEmails, offer, {
+      modelChoice: model,
+      instructions,
+      onProgress: (completed, total) => sendEvent({ type: "progress", completed, total })
+    });
+  } catch (err) {
+    sendEvent({ type: "error", error: err instanceof Error ? err.message : "Refinement failed" });
+    res.end();
+    return;
+  }
+
+  const now = new Date().toISOString();
+
+  const newGenInsert = await supabase
+    .from("outreach_generations")
+    .insert({
+      source_type: orig.source_type,
+      campaign_id: orig.campaign_id,
+      list_id: orig.list_id,
+      offer_id: orig.offer_id,
+      generated_count: refined.length,
+      model_version: modelVersion,
+      created_at: now
+    })
+    .select("id")
+    .single();
+
+  if (newGenInsert.error || !newGenInsert.data) {
+    sendEvent({ type: "error", error: newGenInsert.error?.message ?? "Failed to save refined history" });
+    res.end();
+    return;
+  }
+  const newGenId = newGenInsert.data.id;
+
+  const historyRows = refined.map(({ lead, emails }) => ({
+    generation_id: newGenId,
+    lead_id: lead.id,
+    offer_id: orig.offer_id,
+    name: lead.name,
+    email: lead.email,
+    phone: lead.phone,
+    website: lead.website,
+    location_text: lead.location_text,
+    opener_subject: emails.opener_subject,
+    opener_body: emails.opener_body,
+    followup1_subject: emails.followup1_subject,
+    followup1_body: emails.followup1_body,
+    followup2_subject: emails.followup2_subject,
+    followup2_body: emails.followup2_body,
+    created_at: now
+  }));
+
+  const historyInsert = await supabase.from("outreach_generation_rows").insert(historyRows);
+  if (historyInsert.error) {
+    await supabase.from("outreach_generations").delete().eq("id", newGenId);
+    sendEvent({ type: "error", error: historyInsert.error.message });
+    res.end();
+    return;
+  }
+
+  const upsertRows = refined.map(({ lead, emails }) => ({
+    lead_id: lead.id,
+    offer_id: orig.offer_id,
+    opener_subject: emails.opener_subject,
+    opener_body: emails.opener_body,
+    followup1_subject: emails.followup1_subject,
+    followup1_body: emails.followup1_body,
+    followup2_subject: emails.followup2_subject,
+    followup2_body: emails.followup2_body,
+    model_version: modelVersion,
+    generated_at: now,
+    updated_at: now
+  }));
+
+  await supabase.from("lead_outreach").upsert(upsertRows, { onConflict: "lead_id,offer_id" });
+
+  const rows = refined.map(({ lead, emails }) => ({
+    lead_id: lead.id,
+    offer_id: orig.offer_id,
+    name: lead.name,
+    email: lead.email,
+    phone: lead.phone,
+    website: lead.website,
+    location_text: lead.location_text,
+    ...emails
+  }));
+
+  const [historySummary] = await listOutreachHistory({
+    campaignId: orig.campaign_id ?? undefined,
+    listId: orig.list_id ?? undefined,
+    offerId: orig.offer_id,
+    limit: 1
+  });
+
+  sendEvent({ type: "done", refined: rows.length, rows, history: historySummary ?? null });
+  res.end();
 });
 
 outreachRouter.get("/history", async (req, res) => {

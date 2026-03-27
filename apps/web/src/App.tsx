@@ -127,6 +127,11 @@ export function App() {
   const [loadingOutreachHistory, setLoadingOutreachHistory] = useState(false);
   const [historyRestored, setHistoryRestored] = useState(false);
   const [modalEmail, setModalEmail] = useState<ModalEmail | null>(null);
+  const [refineOpen, setRefineOpen] = useState(false);
+  const [refineInstructions, setRefineInstructions] = useState("");
+  const [refining, setRefining] = useState(false);
+  const [refineError, setRefineError] = useState("");
+  const [refineProgress, setRefineProgress] = useState<{ completed: number; total: number } | null>(null);
 
   // Ã¢â€â‚¬Ã¢â€â‚¬ Derived Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const selectedCampaign = useMemo(() => campaigns.find(c => c.id === selectedCampaignId) ?? null, [campaigns, selectedCampaignId]);
@@ -506,6 +511,62 @@ export function App() {
     finally { setGeneratingOutreach(false); }
   }
 
+  async function onRefineOutreach() {
+    if (!selectedOutreachHistoryId) return;
+    setRefining(true); setRefineError(""); setRefineProgress(null);
+    try {
+      const res = await fetch(`/api/outreach/refine/${selectedOutreachHistoryId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instructions: refineInstructions.trim() || undefined, model: outreachModel })
+      });
+      if (!res.ok || !res.body) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { error?: string }).error ?? `Request failed (${res.status})`);
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+        for (const part of parts) {
+          if (!part.startsWith("data: ")) continue;
+          const evt = JSON.parse(part.slice(6)) as {
+            type: string; completed?: number; total?: number;
+            rows?: OutreachRow[]; history?: OutreachHistorySummary; error?: string;
+          };
+          if (evt.type === "start") {
+            setRefineProgress({ completed: 0, total: evt.total ?? 0 });
+          } else if (evt.type === "progress") {
+            setRefineProgress({ completed: evt.completed ?? 0, total: evt.total ?? 0 });
+          } else if (evt.type === "done") {
+            setOutreachRows(evt.rows ?? []);
+            if (evt.history) {
+              setSelectedOutreachHistoryId(evt.history.id);
+              window.localStorage.setItem("outreach:last-history-id", evt.history.id);
+            }
+            await loadOutreachHistory();
+            setRefineOpen(false);
+            setRefineInstructions("");
+            setRefineProgress(null);
+          } else if (evt.type === "error") {
+            throw new Error(evt.error ?? "Refinement failed");
+          }
+        }
+      }
+    } catch (err) {
+      setRefineError(err instanceof Error ? err.message : "Refinement failed");
+      setRefineProgress(null);
+    } finally {
+      setRefining(false);
+    }
+  }
+
+
   // Ã¢â€â‚¬Ã¢â€â‚¬ Export helpers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   function csvCell(v: string | null | undefined) { return `"${String(v ?? "").replace(/"/g, '""')}"`; }
   function today() { return new Date().toISOString().slice(0, 10); }
@@ -649,7 +710,8 @@ export function App() {
       hour: "2-digit",
       minute: "2-digit"
     });
-    return `${dateLabel} · ${sourceLabel} · ${entry.offer_name} · ${entry.generated_count} rows`;
+    const refined = entry.model_version.startsWith("refined:") ? "Refined · " : "";
+    return `${refined}${dateLabel} · ${sourceLabel} · ${entry.offer_name} · ${entry.generated_count} rows`;
   }
 
   function jumpToSection(sectionId: string) {
@@ -1344,6 +1406,63 @@ export function App() {
             </div>
             {outreachHistory.length === 0 && (
               <div className="history-empty">No saved outreach history yet. Your first generation will appear here automatically.</div>
+            )}
+            {selectedOutreachHistoryId && (
+              <div className="refine-panel">
+                {!refineOpen ? (
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    onClick={() => { setRefineOpen(true); setRefineError(""); }}
+                    disabled={refining}
+                  >
+                    Refine these emails
+                  </button>
+                ) : (
+                  <div className="refine-form">
+                    <textarea
+                      className="refine-instructions"
+                      rows={2}
+                      placeholder="Leave blank to auto-fix (em dashes, possessives, formatting), or describe extra changes..."
+                      value={refineInstructions}
+                      onChange={(e) => setRefineInstructions(e.target.value)}
+                      disabled={refining}
+                    />
+                    {refining && refineProgress && (
+                      <div className="refine-progress">
+                        <div className="refine-progress-bar">
+                          <div
+                            className="refine-progress-fill"
+                            style={{ width: `${Math.round((refineProgress.completed / refineProgress.total) * 100)}%` }}
+                          />
+                        </div>
+                        <span className="refine-progress-label">
+                          {refineProgress.completed} / {refineProgress.total} refined
+                        </span>
+                      </div>
+                    )}
+                    <div className="refine-actions">
+                      <button
+                        type="button"
+                        className="btn-generate"
+                        onClick={() => void onRefineOutreach()}
+                        disabled={refining}
+                      >
+                        {refining ? <><span className="spinner" /> Refining...</> : "Run Refine"}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        onClick={() => { setRefineOpen(false); setRefineInstructions(""); setRefineError(""); }}
+                        disabled={refining}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                    {refineError && <div className="outreach-error">{refineError}</div>}
+                  </div>
+                )}
+              </div>
             )}
           </div>
 

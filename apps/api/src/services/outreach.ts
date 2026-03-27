@@ -69,11 +69,22 @@ function resolveOutreachConcurrency(modelChoice?: OutreachModelChoice): number {
 }
 
 function shortName(fullName: string): string {
-  return fullName
+  const stripped = fullName
     .split(/\s*[-–|]\s*/)[0]
     .trim()
-    .replace(/\b(Ltd|LLC|Inc|Corp|Co|Limited|plc)\.?$/i, "")
+    .replace(/\b(Ltd|LLC|Inc|Corp|Co|Limited|plc|Group|Holdings|International|Solutions|Services|Technologies|Consultancy|Contractors|Associates)\.?$/i, "")
     .trim();
+
+  // Strip leading "The " — "The Window Company" → "Window Company"
+  const withoutThe = stripped.replace(/^The\s+/i, "").trim();
+
+  const words = withoutThe.split(/\s+/);
+  // If more than 3 words, use the first 2 — the brand identifier a person would say
+  // e.g. "1st Class Window Systems" → "1st Class"
+  if (words.length > 3) {
+    return words.slice(0, 2).join(" ");
+  }
+  return withoutThe;
 }
 
 function shortBizDescription(summary: string | null): string {
@@ -158,6 +169,140 @@ function parseEmailJson(content: string): GeneratedEmails | null {
   }
 }
 
+export async function refineEmailsForLead(
+  lead: LeadForOutreach,
+  existing: GeneratedEmails,
+  offer: OfferForOutreach,
+  options: GenerateLeadOptions & { instructions?: string } = {}
+): Promise<GeneratedEmails> {
+  if (!env.mistralApiKey) {
+    return existing;
+  }
+
+  const model = resolveOutreachModel(options.modelChoice);
+  const biz = shortName(lead.name);
+
+  const systemPrompt = `You are a B2B cold email editor.
+
+You will be given existing cold emails. Your job is to fix specific issues and polish the writing.
+Do NOT rewrite from scratch. Keep the core message, structure, and intent. Only change what needs fixing.
+
+Rules to always apply:
+- Replace every em dash (—) and en dash (–) with a comma or a full stop. Never use dashes.
+- Remove any possessive 's or s' attached to the company name. Rephrase the sentence naturally instead.
+- The greeting must be "Hi ${biz} team," on its own line. Use this exact short name.
+- Plain text only. No HTML, no markdown, no bullet points.
+- No placeholders like [First Name] or [Company].
+- Paragraphs separated by a single blank line only.
+
+Return only valid JSON with the same six fields as the input.`;
+
+  const instructionsBlock = options.instructions?.trim()
+    ? `\n\nAdditional instructions from the sender:\n${options.instructions.trim()}`
+    : "";
+
+  const userPrompt = `Polish these cold emails for the following prospect.
+
+Company short name: ${biz}
+
+Existing emails:
+Opener subject: ${existing.opener_subject}
+Opener body:
+${existing.opener_body}
+
+Follow-up 1 subject: ${existing.followup1_subject}
+Follow-up 1 body:
+${existing.followup1_body}
+
+Follow-up 2 subject: ${existing.followup2_subject}
+Follow-up 2 body:
+${existing.followup2_body}
+${instructionsBlock}
+
+Return only this JSON:
+{
+  "opener_subject": "...",
+  "opener_body": "...",
+  "followup1_subject": "...",
+  "followup1_body": "...",
+  "followup2_subject": "...",
+  "followup2_body": "..."
+}`;
+
+  try {
+    const controller = new AbortController();
+    const timeoutMs = Number.isFinite(env.outreachMistralTimeoutMs) && env.outreachMistralTimeoutMs > 0
+      ? env.outreachMistralTimeoutMs
+      : 45000;
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const res = await fetch(`${env.mistralBaseUrl.replace(/\/$/, "")}/v1/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${env.mistralApiKey}`
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model,
+        temperature: 0.3,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt }
+        ]
+      })
+    }).finally(() => clearTimeout(timeout));
+
+    if (!res.ok) {
+      console.warn(`[refine] Mistral API error ${res.status} for lead ${lead.id}, keeping original`);
+      return existing;
+    }
+
+    const data = (await res.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+
+    const content = data.choices?.[0]?.message?.content ?? "";
+    const parsed = parseEmailJson(content);
+    if (parsed) return parsed;
+
+    console.warn(`[refine] JSON parse failed for lead ${lead.id}, keeping original. Raw: ${content.slice(0, 200)}`);
+    return existing;
+  } catch (err) {
+    console.warn(`[refine] Error for lead ${lead.id}, keeping original:`, err);
+    return existing;
+  }
+}
+
+export async function refineEmailsForLeads(
+  leads: Array<LeadForOutreach & { existingEmails: GeneratedEmails }>,
+  offer: OfferForOutreach,
+  options: GenerateLeadBatchOptions & { instructions?: string; onProgress?: (completed: number, total: number) => void } = {}
+): Promise<Array<{ lead: LeadForOutreach; emails: GeneratedEmails }>> {
+  const results: Array<{ lead: LeadForOutreach; emails: GeneratedEmails }> = [];
+  // Refine is editing, not generating — use higher concurrency than generation
+  const concurrency = options.concurrency ?? 8;
+  let completed = 0;
+
+  for (let i = 0; i < leads.length; i += concurrency) {
+    const batch = leads.slice(i, i + concurrency);
+    const settled = await Promise.allSettled(
+      batch.map((lead) => refineEmailsForLead(lead, lead.existingEmails, offer, options))
+    );
+    for (let j = 0; j < batch.length; j += 1) {
+      const result = settled[j];
+      results.push({
+        lead: batch[j],
+        emails: result.status === "fulfilled" ? result.value : batch[j].existingEmails
+      });
+    }
+    completed += batch.length;
+    options.onProgress?.(completed, leads.length);
+  }
+
+  return results;
+}
+
 export async function generateEmailsForLead(
   lead: LeadForOutreach,
   offer: OfferForOutreach,
@@ -178,20 +323,24 @@ Write cold outreach that follows modern deliverability-first standards:
 - Plain-text only. No HTML, no markdown, no bullets inside the email body.
 - Short, human, and conversational. These should feel like one-to-one emails, not campaigns.
 - Never invent or use a personal first name. We do not know the recipient's first name.
-- If you greet them, use the company naturally, for example "Hi ${biz} team,". Never use the full long business name if it sounds clumsy.
+- Greet them using the short company name followed by "team," — for example "Hi Window Systems team,". All three emails must open with this greeting on its own line.
+- The short company name is already provided. Use it exactly as given. Do not use the full original business name.
+- Never add 's or s' after the company name. Do not use the company name in a possessive form under any circumstances.
 - Never use placeholders like [First Name], [Company], or {{name}}.
 - Never use generic openers like "I hope you are well", "My name is", or "I came across your business".
-- The opening line must reference something specific about what the company does.
+- The first line after the greeting must reference something specific about what the company does.
 - Do not copy the offer description verbatim. Rewrite it naturally in simple language.
-- One clear CTA only.
+- One clear CTA only. Place it as the final line of the body before signing off.
 - No hype, no exaggerated claims, no ALL CAPS, no emojis, no heavy punctuation.
+- No em dashes (—) or en dashes (–). Use a comma or a full stop instead.
 - Subjects should be short and natural, usually 2 to 6 words.
+- Separate paragraphs with a single blank line. No extra blank lines.
 - Return only valid JSON with the required fields.`;
 
   const userPrompt = `Write 3 cold emails for this prospect.
 
 Prospect:
-- Company short name: ${biz}
+- Company short name (use this exactly, do not change it): ${biz}
 - Website: ${domain ?? "not listed"}
 - What they do: ${desc}
 - Location: ${lead.location_text ?? "unknown"}
@@ -205,25 +354,27 @@ Offer context:
 Required style:
 - Plain text only.
 - Personal and specific to this business type.
+- All three emails must open with: Hi ${biz} team,
+- Never write ${biz}'s or ${biz}s' — do not use the company name in possessive form.
 - Use company-level language because we do not know a person's first name.
-- Keep the opener around 60 to 110 words.
-- Keep follow-up 1 around 35 to 60 words.
-- Keep follow-up 2 around 25 to 45 words.
+- Keep the opener around 60 to 110 words (body only, not counting greeting).
+- Keep follow-up 1 around 35 to 60 words (body only, not counting greeting).
+- Keep follow-up 2 around 25 to 45 words (body only, not counting greeting).
 - No links unless they are already implied by the CTA text.
-- No list formatting.
+- No list formatting. Paragraphs only.
 
 Email requirements:
 1. Opener
 - Subject: short, natural, non-salesy.
-- Body: specific observation -> likely pain point -> simple value -> CTA.
+- Body structure: greeting line → blank line → specific observation about their work → blank line → likely pain point tied to simple value → blank line → CTA.
 
 2. Follow-up 1
-- Subject: can be a light reply-thread style.
-- Body: one new angle relevant to their business and a soft CTA.
+- Subject: reply-thread style starting with "Re:".
+- Body structure: greeting line → blank line → one new angle or specific example relevant to their business → blank line → soft CTA.
 
 3. Follow-up 2
-- Subject: brief final nudge.
-- Body: very short, respectful, warm close.
+- Subject: brief, final-note style.
+- Body structure: greeting line → blank line → very short warm close leaving door open → blank line → CTA or sign-off.
 
 Return only this JSON:
 {
