@@ -45,6 +45,7 @@ type ModalEmail = {
 };
 type OutreachModelOption = "default" | "large" | "medium" | "small";
 type OutreachExportFormat = "csv" | "xlsx";
+type OutreachRunSummary = { generatedNew: number; reusedExisting: number; total: number };
 type KeywordMatch = { keyword: string; resultsCount: number; searchedAt: string; runId: string; campaignId: string };
 type DuplicateWarning =
   | { duplicateType: "campaign"; existingRunId: string; existingCampaignId: string; leadCount: number; completedAt: string }
@@ -121,6 +122,7 @@ export function App() {
   const [outreachExportFormat, setOutreachExportFormat] = useState<OutreachExportFormat>("csv");
   const [outreachWebhookUrl, setOutreachWebhookUrl] = useState("");
   const [sendingOutreachWebhook, setSendingOutreachWebhook] = useState(false);
+  const [outreachRunSummary, setOutreachRunSummary] = useState<OutreachRunSummary | null>(null);
   const [outreachHistory, setOutreachHistory] = useState<OutreachHistorySummary[]>([]);
   const [outreachHistoryLoaded, setOutreachHistoryLoaded] = useState(false);
   const [selectedOutreachHistoryId, setSelectedOutreachHistoryId] = useState("");
@@ -190,6 +192,8 @@ export function App() {
 
   const runEvents = [...(run?.errors ?? [])].sort((a, b) => a.created_at.localeCompare(b.created_at));
   const latestRunEvent = [...runEvents].reverse().find(e => e.error_message.startsWith("[info]"))?.error_message.replace(/^\[info\]\s*/, "") ?? "";
+  const runStoppedByUser = runEvents.some((event) => /run stop requested by user|run stopped by user/i.test(event.error_message));
+  const runDisplayStatus = runStoppedByUser ? "stopped" : run?.status ?? "queued";
   const processedCount = (run?.inserted_count ?? 0) + (run?.updated_count ?? 0) + (run?.rejected_no_email_count ?? 0);
   const progressPct = run ? (run.total_candidates > 0 ? Math.min(100, Math.round((processedCount / run.total_candidates) * 100)) : run.status === "completed" ? 100 : 0) : 0;
 
@@ -244,6 +248,7 @@ export function App() {
       const data = await api<OutreachHistoryDetail>(`/api/outreach/history/${historyId}`);
       setSelectedOutreachHistoryId(data.id);
       setOutreachRows(data.rows);
+      setOutreachRunSummary(null);
       setSelectedOfferId(data.offer_id);
       if (data.source_type === "campaign") {
         setOutreachSourceMode("campaign");
@@ -385,6 +390,20 @@ export function App() {
     }
   }
 
+  async function onStopRun() {
+    if (!run || (run.status !== "queued" && run.status !== "running")) return;
+    setLoading(true);
+    setError("");
+    try {
+      const stopped = await api<Run>(`/api/runs/${run.id}/cancel`, { method: "POST" });
+      setRun(stopped);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to stop run");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function onAddToExistingList(listId: string) {
     if (selectedLeadIds.size === 0) return;
     setListModalLoading(true); setListModalError("");
@@ -501,12 +520,20 @@ export function App() {
     const payload = outreachSourceMode === "campaign"
       ? { campaignId: outreachCampaignId, offerId: selectedOfferId, model: outreachModel }
       : { listId: outreachListId, offerId: selectedOfferId, model: outreachModel };
-    setGeneratingOutreach(true); setOutreachError(""); setOutreachRows([]);
+    setGeneratingOutreach(true); setOutreachError(""); setOutreachRows([]); setOutreachRunSummary(null);
     try {
-      const result = await api<{ generated: number; rows: OutreachRow[]; history: OutreachHistorySummary | null }>("/api/outreach/generate", {
+      const result = await api<{
+        generated: number; generatedNew: number; reusedExisting: number;
+        rows: OutreachRow[]; history: OutreachHistorySummary | null
+      }>("/api/outreach/generate", {
         method: "POST", body: JSON.stringify(payload)
       });
       setOutreachRows(result.rows);
+      setOutreachRunSummary({
+        generatedNew: result.generatedNew,
+        reusedExisting: result.reusedExisting,
+        total: result.generated
+      });
       if (result.history) {
         setSelectedOutreachHistoryId(result.history.id);
         window.localStorage.setItem("outreach:last-history-id", result.history.id);
@@ -935,8 +962,15 @@ export function App() {
           {run && (
             <div className="run-card">
               <div className="run-card-top">
-                <strong>Run status:</strong>
-                <span className={`run-status-badge run-status-${run.status}`}>{run.status}</span>
+                <div className="run-card-title">
+                  <strong>Run status:</strong>
+                  <span className={`run-status-badge run-status-${runDisplayStatus}`}>{runDisplayStatus}</span>
+                </div>
+                {(run.status === "queued" || run.status === "running") && (
+                  <button className="btn-clear btn-stop-run" type="button" onClick={() => void onStopRun()} disabled={loading}>
+                    Stop Run
+                  </button>
+                )}
               </div>
               <div className="progress-wrap">
                 <div className="progress-label">Progress: {progressPct}% ({processedCount}/{run.total_candidates || 0})</div>
@@ -1520,14 +1554,24 @@ export function App() {
 
           {outreachError && <p className="error" style={{ marginTop: "0.75rem" }}>{outreachError}</p>}
 
-          {outreachRows.length > 0 && (
-            <>
-              <div className="results-banner">
-                <span className="results-count">{outreachRows.length}</span>
-                leads with personalised emails ready.
-                <span className="results-hint">Click any row to preview all 3 emails.</span>
-              </div>
-              <div className="outreach-delivery-panel">
+              {outreachRows.length > 0 && (
+                <>
+                  <div className="results-banner">
+                    <span className="results-count">{outreachRows.length}</span>
+                    leads with personalised emails ready.
+                    <span className="results-hint">Click any row to preview all 3 emails.</span>
+                  </div>
+                  {outreachRunSummary && (
+                    <p className="run-hint" style={{ marginTop: "0.75rem" }}>
+                      {outreachRunSummary.generatedNew > 0
+                        ? `Generated ${outreachRunSummary.generatedNew} new lead${outreachRunSummary.generatedNew !== 1 ? "s" : ""}`
+                        : "No new emails generated"}
+                      {outreachRunSummary.reusedExisting > 0
+                        ? `, reused ${outreachRunSummary.reusedExisting} existing lead${outreachRunSummary.reusedExisting !== 1 ? "s" : ""} for this offer.`
+                        : "."}
+                    </p>
+                  )}
+                  <div className="outreach-delivery-panel">
                 <div className="outreach-delivery-grid">
                   <label>
                     Export format

@@ -19,6 +19,7 @@ const MAX_AI_KEYWORDS = 15;
 const GOOGLE_MAX_PER_KEYWORD = 60;
 const CRAWL_CONCURRENCY = 8;
 const CRAWL_PROGRESS_INTERVAL = 10;
+const RUN_STATUS_CHECK_INTERVAL_MS = 1500;
 
 export function buildQueryFingerprint(keywords: string[], location: string): string {
   const sorted = [...keywords].map((k) => k.toLowerCase().trim()).sort().join("|");
@@ -49,6 +50,13 @@ type EnrichmentJob = {
 };
 
 const INFO_PREFIX = "[info]";
+
+class RunStoppedError extends Error {
+  constructor() {
+    super("Run stopped by user.");
+    this.name = "RunStoppedError";
+  }
+}
 
 const emptyCounters = (): RunCounters => ({
   totalCandidates: 0,
@@ -153,13 +161,47 @@ async function flushRunMetrics(runId: string, counters: RunCounters, status?: "r
     inserted_count: counters.insertedCount,
     updated_count: counters.updatedCount,
     deduped_count: counters.dedupedCount,
-    rejected_no_email_count: counters.rejectedNoEmailCount
+    rejected_no_email_count: counters.rejectedNoEmailCount,
+    updated_at: new Date().toISOString()
   };
 
   if (status) payload.status = status;
   if (status === "completed" || status === "failed") payload.completed_at = new Date().toISOString();
 
   await supabase.from("collection_runs").update(payload).eq("id", runId);
+}
+
+function createRunStopGuard(runId: string) {
+  let stopped = false;
+  let lastChecked = 0;
+
+  async function refresh(force = false): Promise<boolean> {
+    if (stopped) return true;
+
+    const now = Date.now();
+    if (!force && now - lastChecked < RUN_STATUS_CHECK_INTERVAL_MS) {
+      return false;
+    }
+
+    lastChecked = now;
+    const result = await supabase
+      .from("collection_runs")
+      .select("status")
+      .eq("id", runId)
+      .single();
+
+    stopped = Boolean(result.data && result.data.status !== "running" && result.data.status !== "queued");
+    return stopped;
+  }
+
+  return {
+    async assertActive() {
+      if (await refresh()) throw new RunStoppedError();
+    },
+    async isStopped() {
+      return refresh(true);
+    }
+  };
 }
 
 async function enrichAndPersistLead(runId: string, campaignId: string, input: EnrichmentJob): Promise<void> {
@@ -307,14 +349,15 @@ export async function executeCollectionRun(
 ): Promise<void> {
   const counters = emptyCounters();
   const targetEmails = Math.max(1, options.targetLeads);
+  const runGuard = createRunStopGuard(runId);
 
   await supabase
     .from("collection_runs")
-    .update({ status: "running", started_at: new Date().toISOString() })
+    .update({ status: "running", started_at: new Date().toISOString(), updated_at: new Date().toISOString() })
     .eq("id", runId);
 
   const fingerprint = buildQueryFingerprint(campaign.niche_keywords, campaign.location_scope);
-  await supabase.from("collection_runs").update({ query_fingerprint: fingerprint }).eq("id", runId);
+  await supabase.from("collection_runs").update({ query_fingerprint: fingerprint, updated_at: new Date().toISOString() }).eq("id", runId);
 
   const selectedSources = Object.entries(sources).filter(([, enabled]) => enabled).map(([name]) => name);
   await logRunEvent(
@@ -325,174 +368,206 @@ export async function executeCollectionRun(
 
   let allKeywords = [...campaign.niche_keywords];
 
-  if (sources.google) {
-    const rawCandidatesNeeded = Math.ceil(targetEmails / EMAIL_YIELD_RATE);
-    const keywordsNeeded = Math.ceil(rawCandidatesNeeded / GOOGLE_MAX_PER_KEYWORD);
-    const aiKeywordsNeeded = Math.max(0, keywordsNeeded - allKeywords.length);
+  try {
+    if (sources.google) {
+      const rawCandidatesNeeded = Math.ceil(targetEmails / EMAIL_YIELD_RATE);
+      const keywordsNeeded = Math.ceil(rawCandidatesNeeded / GOOGLE_MAX_PER_KEYWORD);
+      const aiKeywordsNeeded = Math.max(0, keywordsNeeded - allKeywords.length);
 
-    if (aiKeywordsNeeded > 0) {
-      const capped = Math.min(aiKeywordsNeeded, MAX_AI_KEYWORDS);
-      await logRunEvent(
-        runId,
-        campaign.id,
-        `Need ~${rawCandidatesNeeded} raw candidates for ${targetEmails} email target. ` +
-          `${allKeywords.length} keyword(s) provided -> generating ${capped} more with AI...`
-      );
-
-      const expanded = await expandKeywordsWithAI(allKeywords, campaign.location_scope, capped);
-      if (expanded.length > 0) {
+      if (aiKeywordsNeeded > 0) {
+        const capped = Math.min(aiKeywordsNeeded, MAX_AI_KEYWORDS);
         await logRunEvent(
           runId,
           campaign.id,
-          `AI added ${expanded.length} keyword(s): ${expanded.map((keyword) => `"${keyword}"`).join(", ")}`
+          `Need ~${rawCandidatesNeeded} raw candidates for ${targetEmails} email target. ` +
+            `${allKeywords.length} keyword(s) provided -> generating ${capped} more with AI...`
         );
-        allKeywords = [...allKeywords, ...expanded];
-      } else {
-        await logRunEvent(runId, campaign.id, "AI keyword expansion returned no results; using original keywords only.");
+
+        await runGuard.assertActive();
+        const expanded = await expandKeywordsWithAI(allKeywords, campaign.location_scope, capped);
+        if (expanded.length > 0) {
+          await logRunEvent(
+            runId,
+            campaign.id,
+            `AI added ${expanded.length} keyword(s): ${expanded.map((keyword) => `"${keyword}"`).join(", ")}`
+          );
+          allKeywords = [...allKeywords, ...expanded];
+        } else {
+          await logRunEvent(runId, campaign.id, "AI keyword expansion returned no results; using original keywords only.");
+        }
       }
+
+      await logRunEvent(
+        runId,
+        campaign.id,
+        `Searching Google with ${allKeywords.length} keyword(s): ${allKeywords.map((keyword) => `"${keyword}"`).join(", ")}`
+      );
     }
 
-    await logRunEvent(
-      runId,
-      campaign.id,
-      `Searching Google with ${allKeywords.length} keyword(s): ${allKeywords.map((keyword) => `"${keyword}"`).join(", ")}`
-    );
-  }
+    const sourceTasks: Array<Promise<{ source: SourceName; leads: RawLead[]; keywords?: string[] }>> = [];
 
-  const sourceTasks: Array<Promise<{ source: SourceName; leads: RawLead[]; keywords?: string[] }>> = [];
+    if (sources.google) {
+      sourceTasks.push((async () => {
+        const leads = await fetchGoogleLeads({
+          niche: allKeywords[0],
+          allKeywords,
+          subNiche: campaign.sub_niche,
+          location: campaign.location_scope,
+          maxResults: GOOGLE_MAX_PER_KEYWORD,
+          assertActive: () => runGuard.assertActive(),
+          onKeywordStart: async ({ keyword, index, total }) => {
+            await logRunEvent(runId, campaign.id, `Google keyword ${index}/${total}: ${keyword}`);
+          },
+          onKeywordComplete: async ({ keyword, index, total, resultCount }) => {
+            await logRunEvent(runId, campaign.id, `Google keyword ${index}/${total} complete: ${keyword} -> ${resultCount} places`);
+            await logSearchQuery(
+              runId,
+              campaign.id,
+              fingerprint,
+              keyword,
+              campaign.location_scope,
+              resultCount,
+              !campaign.niche_keywords.some((original) => original.toLowerCase().trim() === keyword.toLowerCase().trim())
+            );
+          },
+          onPlaceProcessed: async ({ keyword, index, total, name, website, email }) => {
+            const websiteLabel = website ? website.replace(/^https?:\/\//, "") : "no website";
+            const emailLabel = email ?? "no email found";
+            await logRunEvent(
+              runId,
+              campaign.id,
+              `Google prospect ${index}/${total} for "${keyword}": ${name} | ${websiteLabel} | ${emailLabel}`
+            );
+          }
+        });
+        return { source: "google" as const, leads, keywords: allKeywords };
+      })());
+    }
 
-  if (sources.google) {
-    sourceTasks.push((async () => {
-      const leads = await fetchGoogleLeads({
-        niche: allKeywords[0],
-        allKeywords,
-        subNiche: campaign.sub_niche,
-        location: campaign.location_scope,
-        maxResults: GOOGLE_MAX_PER_KEYWORD
-      });
-      return { source: "google" as const, leads, keywords: allKeywords };
-    })());
-  }
+    if (sources.yelp) {
+      sourceTasks.push((async () => {
+        await runGuard.assertActive();
+        await logRunEvent(runId, campaign.id, "Fetching leads from Yelp...");
+        const leads = await fetchYelpLeads({
+          niche: allKeywords[0],
+          location: campaign.location_scope,
+          maxResults: targetEmails
+        });
+        return { source: "yelp" as const, leads };
+      })());
+    }
 
-  if (sources.yelp) {
-    sourceTasks.push((async () => {
-      await logRunEvent(runId, campaign.id, "Fetching leads from Yelp...");
-      const leads = await fetchYelpLeads({
-        niche: allKeywords[0],
-        location: campaign.location_scope,
-        maxResults: targetEmails
-      });
-      return { source: "yelp" as const, leads };
-    })());
-  }
+    if (sources.apify) {
+      sourceTasks.push((async () => {
+        await runGuard.assertActive();
+        await logRunEvent(runId, campaign.id, "Fetching leads from Apify...");
+        const leads = await fetchApifyLeads({
+          niche: allKeywords[0],
+          location: campaign.location_scope,
+          maxResults: targetEmails
+        });
+        return { source: "apify" as const, leads };
+      })());
+    }
 
-  if (sources.apify) {
-    sourceTasks.push((async () => {
-      await logRunEvent(runId, campaign.id, "Fetching leads from Apify...");
-      const leads = await fetchApifyLeads({
-        niche: allKeywords[0],
-        location: campaign.location_scope,
-        maxResults: targetEmails
-      });
-      return { source: "apify" as const, leads };
-    })());
-  }
+    const settled = await Promise.allSettled(sourceTasks);
+    const allRaw: RawLead[] = [];
 
-  const settled = await Promise.allSettled(sourceTasks);
-  const allRaw: RawLead[] = [];
+    for (const result of settled) {
+      if (result.status === "fulfilled") {
+        allRaw.push(...result.value.leads);
+        await logRunEvent(runId, campaign.id, `Fetched ${result.value.leads.length} candidates from ${result.value.source}.`);
 
-  for (const result of settled) {
-    if (result.status === "fulfilled") {
-      allRaw.push(...result.value.leads);
-      await logRunEvent(runId, campaign.id, `Fetched ${result.value.leads.length} candidates from ${result.value.source}.`);
-
-      if (result.value.source === "google" && result.value.keywords) {
-        const perKeyword = Math.ceil(result.value.leads.length / result.value.keywords.length);
-        const originalKeywords = new Set(campaign.niche_keywords.map((keyword) => keyword.toLowerCase().trim()));
-
-        for (const keyword of result.value.keywords) {
+        if (result.value.source !== "google") {
           await logSearchQuery(
             runId,
             campaign.id,
             fingerprint,
-            keyword,
+            allKeywords[0],
             campaign.location_scope,
-            perKeyword,
-            !originalKeywords.has(keyword.toLowerCase().trim())
+            result.value.leads.length,
+            false
           );
         }
+      } else if (result.reason instanceof RunStoppedError) {
+        await logRunEvent(runId, campaign.id, "Run stopped before source fetch completed.");
       } else {
-        await logSearchQuery(
+        await logRunError(runId, campaign.id, "pipeline", result.reason);
+      }
+    }
+
+    counters.totalCandidates = allRaw.length;
+    await flushRunMetrics(runId, counters, "running");
+
+    if (counters.totalCandidates === 0) {
+      await logRunEvent(runId, campaign.id, "No candidates returned. Check source toggles, API keys, and keywords.");
+      await flushRunMetrics(runId, counters, "completed");
+      return;
+    }
+
+    await logRunEvent(runId, campaign.id, `${counters.totalCandidates} unique candidates. Crawling all for emails...`);
+
+    const enrichmentJobsByLeadId = new Map<string, EnrichmentJob>();
+    const crawlCache = new Map<string, Promise<CrawlResult>>();
+    let processed = 0;
+    let uniqueVerifiedLeadCount = 0;
+
+    await mapLimit(allRaw, CRAWL_CONCURRENCY, async (raw) => {
+      await runGuard.assertActive();
+      await logRunEvent(runId, campaign.id, `Crawling ${raw.name}${raw.website ? ` | ${raw.website.replace(/^https?:\/\//, "")}` : ""}`);
+      const job = await upsertLead(runId, campaign, raw, counters, crawlCache);
+      processed += 1;
+
+      if (job && !enrichmentJobsByLeadId.has(job.leadId)) {
+        enrichmentJobsByLeadId.set(job.leadId, job);
+        uniqueVerifiedLeadCount += 1;
+        await logRunEvent(runId, campaign.id, `Verified email kept for ${job.name}: ${job.email}`);
+      } else if (!job) {
+        await logRunEvent(runId, campaign.id, `No verified email found for ${raw.name}`);
+      }
+
+      if (processed % CRAWL_PROGRESS_INTERVAL === 0 || processed === allRaw.length) {
+        await logRunEvent(
           runId,
           campaign.id,
-          fingerprint,
-          allKeywords[0],
-          campaign.location_scope,
-          result.value.leads.length,
-          false
+          `Progress: ${processed}/${allRaw.length} prospects crawled | ${uniqueVerifiedLeadCount} unique email-verified leads so far`
         );
+        await flushRunMetrics(runId, counters, "running");
       }
-    } else {
-      await logRunError(runId, campaign.id, "pipeline", result.reason);
-    }
-  }
+    });
 
-  counters.totalCandidates = allRaw.length;
-  await flushRunMetrics(runId, counters, "running");
+    await logRunEvent(
+      runId,
+      campaign.id,
+      `Crawl complete: ${uniqueVerifiedLeadCount} unique email-verified leads from ${counters.totalCandidates} candidates` +
+        (uniqueVerifiedLeadCount < targetEmails
+          ? ` (target was ${targetEmails} - try more keywords or sources for next run)`
+          : ` - target of ${targetEmails} reached`)
+    );
 
-  if (counters.totalCandidates === 0) {
-    await logRunEvent(runId, campaign.id, "No candidates returned. Check source toggles, API keys, and keywords.");
+    const enrichmentJobs = [...enrichmentJobsByLeadId.values()];
+    await logRunEvent(runId, campaign.id, `Starting enrichment on ${enrichmentJobs.length} unique leads (parallel x6)...`);
+
+    let enrichedCount = 0;
+    await mapLimit(enrichmentJobs, 6, async (job) => {
+      await runGuard.assertActive();
+      await logRunEvent(runId, campaign.id, `Enriching ${job.name}${job.website ? ` | ${job.website.replace(/^https?:\/\//, "")}` : ""}`);
+      await enrichAndPersistLead(runId, campaign.id, job);
+      enrichedCount += 1;
+      if (enrichedCount % 5 === 0 || enrichedCount === enrichmentJobs.length) {
+        await logRunEvent(runId, campaign.id, `Enrichment: ${enrichedCount}/${enrichmentJobs.length}`);
+      }
+    });
+
+    await logRunEvent(runId, campaign.id, "Run completed.");
     await flushRunMetrics(runId, counters, "completed");
-    return;
+  } catch (err) {
+    if (err instanceof RunStoppedError || await runGuard.isStopped()) {
+      await logRunEvent(runId, campaign.id, "Run stopped by user.");
+      await flushRunMetrics(runId, counters, "failed");
+      return;
+    }
+
+    throw err;
   }
-
-  await logRunEvent(runId, campaign.id, `${counters.totalCandidates} unique candidates. Crawling all for emails...`);
-
-  const enrichmentJobsByLeadId = new Map<string, EnrichmentJob>();
-  const crawlCache = new Map<string, Promise<CrawlResult>>();
-  let processed = 0;
-  let uniqueVerifiedLeadCount = 0;
-
-  await mapLimit(allRaw, CRAWL_CONCURRENCY, async (raw) => {
-    const job = await upsertLead(runId, campaign, raw, counters, crawlCache);
-    processed += 1;
-
-    if (job && !enrichmentJobsByLeadId.has(job.leadId)) {
-      enrichmentJobsByLeadId.set(job.leadId, job);
-      uniqueVerifiedLeadCount += 1;
-    }
-
-    if (processed % CRAWL_PROGRESS_INTERVAL === 0 || processed === allRaw.length) {
-      await logRunEvent(
-        runId,
-        campaign.id,
-        `Progress: ${processed}/${allRaw.length} prospects crawled | ${uniqueVerifiedLeadCount} unique email-verified leads so far`
-      );
-      await flushRunMetrics(runId, counters, "running");
-    }
-  });
-
-  await logRunEvent(
-    runId,
-    campaign.id,
-    `Crawl complete: ${uniqueVerifiedLeadCount} unique email-verified leads from ${counters.totalCandidates} candidates` +
-      (uniqueVerifiedLeadCount < targetEmails
-        ? ` (target was ${targetEmails} - try more keywords or sources for next run)`
-        : ` - target of ${targetEmails} reached`)
-  );
-
-  const enrichmentJobs = [...enrichmentJobsByLeadId.values()];
-  await logRunEvent(runId, campaign.id, `Starting enrichment on ${enrichmentJobs.length} unique leads (parallel x6)...`);
-
-  let enrichedCount = 0;
-  await mapLimit(enrichmentJobs, 6, async (job) => {
-    await enrichAndPersistLead(runId, campaign.id, job);
-    enrichedCount += 1;
-    if (enrichedCount % 5 === 0 || enrichedCount === enrichmentJobs.length) {
-      await logRunEvent(runId, campaign.id, `Enrichment: ${enrichedCount}/${enrichmentJobs.length}`);
-    }
-  });
-
-  await logRunEvent(runId, campaign.id, "Run completed.");
-  await flushRunMetrics(runId, counters, "completed");
 }

@@ -8,7 +8,21 @@ type SearchInput = {
   subNiche: string;
   location: string;
   maxResults: number;
+  allKeywords?: string[];
+  assertActive?: () => Promise<void>;
+  onKeywordStart?: (input: { keyword: string; index: number; total: number }) => Promise<void> | void;
+  onKeywordComplete?: (input: { keyword: string; index: number; total: number; resultCount: number }) => Promise<void> | void;
+  onPlaceProcessed?: (input: {
+    keyword: string;
+    index: number;
+    total: number;
+    name: string;
+    website?: string;
+    email?: string;
+  }) => Promise<void> | void;
 };
+
+const GOOGLE_FETCH_TIMEOUT_MS = 15000;
 
 type GoogleTextSearchResponse = {
   status?: string;
@@ -74,7 +88,9 @@ async function fetchPlaceDetails(placeId: string): Promise<GooglePlaceDetailsRes
   const endpoint =
     `https://maps.googleapis.com/maps/api/place/details/json?place_id=${encodeURIComponent(placeId)}` +
     `&fields=${fields}&key=${env.googleMapsApiKey}`;
-  const res = await fetch(endpoint);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GOOGLE_FETCH_TIMEOUT_MS);
+  const res = await fetch(endpoint, { signal: controller.signal }).finally(() => clearTimeout(timer));
   if (!res.ok) {
     throw new Error(`Google details fetch failed: ${res.status}`);
   }
@@ -135,7 +151,9 @@ async function fetchGoogleTextSearchLegacyPage(input: SearchInput, pageToken?: s
   }
 
   const endpoint = `https://maps.googleapis.com/maps/api/place/textsearch/json?${params.toString()}`;
-  const res = await fetch(endpoint);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GOOGLE_FETCH_TIMEOUT_MS);
+  const res = await fetch(endpoint, { signal: controller.signal }).finally(() => clearTimeout(timer));
   if (!res.ok) throw new Error(`Google fetch failed: ${res.status}`);
 
   const data = (await res.json()) as GoogleTextSearchResponse;
@@ -157,6 +175,7 @@ async function fetchGoogleTextSearchLegacyPage(input: SearchInput, pageToken?: s
 async function fetchGoogleTextSearchV1Page(input: SearchInput, pageToken?: string): Promise<GoogleTextSearchResponse> {
   const response = await fetch("https://places.googleapis.com/v1/places:searchText", {
     method: "POST",
+    signal: AbortSignal.timeout(GOOGLE_FETCH_TIMEOUT_MS),
     headers: {
       "Content-Type": "application/json",
       "X-Goog-Api-Key": env.googleMapsApiKey,
@@ -254,9 +273,11 @@ export async function fetchGoogleLeadsForKeyword(input: SearchInput): Promise<Ra
     throw new Error("GOOGLE_MAPS_API_KEY is missing.");
   }
 
+  await input.assertActive?.();
   const results = await fetchGoogleTextSearchResults(input);
 
-  const leads = await mapLimit(results, 8, async (item) => {
+  const leads = await mapLimit(results, 8, async (item, itemIndex) => {
+    await input.assertActive?.();
     const placeId = String(item.place_id ?? "");
     let details: GooglePlaceDetailsResponse["result"] | undefined;
 
@@ -270,6 +291,15 @@ export async function fetchGoogleLeadsForKeyword(input: SearchInput): Promise<Ra
 
     const website = String(details?.website ?? "");
     const email = await extractEmailFromWebsite(website);
+
+    await input.onPlaceProcessed?.({
+      keyword: input.niche,
+      index: itemIndex + 1,
+      total: results.length,
+      name: String(item.name ?? "Unknown business"),
+      website: website || undefined,
+      email
+    });
 
     return {
       sourceName: "google" as const,
@@ -305,10 +335,19 @@ export async function fetchGoogleLeads(input: SearchInput & { allKeywords?: stri
 
   const allLeads: RawLead[] = [];
 
-  for (const keyword of keywords) {
+  for (let idx = 0; idx < keywords.length; idx += 1) {
+    const keyword = keywords[idx];
+    await input.assertActive?.();
+    await input.onKeywordStart?.({ keyword, index: idx + 1, total: keywords.length });
     const keywordInput: SearchInput = { ...input, niche: keyword };
     const leads = await fetchGoogleLeadsForKeyword(keywordInput);
     allLeads.push(...leads);
+    await input.onKeywordComplete?.({
+      keyword,
+      index: idx + 1,
+      total: keywords.length,
+      resultCount: leads.length
+    });
   }
 
   return allLeads;

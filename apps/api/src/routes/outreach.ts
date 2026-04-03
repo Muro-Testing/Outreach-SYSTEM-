@@ -155,6 +155,42 @@ async function fetchLeadsForOutreach(source: OutreachSource): Promise<LeadForOut
   return result.data ?? [];
 }
 
+async function fetchExistingLeadOutreachRows(leadIds: string[], offerId: string) {
+  if (leadIds.length === 0) return new Map<string, GeneratedEmails>();
+
+  const result = await supabase
+    .from("lead_outreach")
+    .select(`
+      lead_id,
+      opener_subject,
+      opener_body,
+      followup1_subject,
+      followup1_body,
+      followup2_subject,
+      followup2_body
+    `)
+    .eq("offer_id", offerId)
+    .in("lead_id", leadIds);
+
+  if (result.error) {
+    throw new Error(result.error.message);
+  }
+
+  const rows = new Map<string, GeneratedEmails>();
+  for (const row of result.data ?? []) {
+    rows.set(String(row.lead_id), {
+      opener_subject: String(row.opener_subject ?? ""),
+      opener_body: String(row.opener_body ?? ""),
+      followup1_subject: String(row.followup1_subject ?? ""),
+      followup1_body: String(row.followup1_body ?? ""),
+      followup2_subject: String(row.followup2_subject ?? ""),
+      followup2_body: String(row.followup2_body ?? "")
+    });
+  }
+
+  return rows;
+}
+
 async function listOutreachHistory(filters: {
   campaignId?: string;
   listId?: string;
@@ -227,11 +263,46 @@ outreachRouter.post("/generate", async (req, res) => {
   }
 
   if (leads.length === 0) {
-    return res.json({ generated: 0, rows: [], history: null });
+    return res.json({ generated: 0, generatedNew: 0, reusedExisting: 0, rows: [], history: null });
   }
 
-  const generated = await generateEmailsForLeads(leads, offer, { modelChoice: model });
+  let existingRows: Map<string, GeneratedEmails>;
+  try {
+    existingRows = await fetchExistingLeadOutreachRows(leads.map((lead) => lead.id), offerId);
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : "Failed to load cached outreach rows" });
+  }
+
+  const leadsToGenerate = leads.filter((lead) => !existingRows.has(lead.id));
+  const generated = leadsToGenerate.length > 0
+    ? await generateEmailsForLeads(leadsToGenerate, offer, { modelChoice: model })
+    : [];
+  const generatedMap = new Map(generated.map((entry) => [entry.lead.id, entry.emails] as const));
   const now = new Date().toISOString();
+  const batchModelVersion = generated.length === 0
+    ? `cached:${modelVersion}`
+    : existingRows.size > 0
+      ? `${modelVersion}+cache`
+      : modelVersion;
+
+  const rows = [];
+  for (const lead of leads) {
+    const emails = existingRows.get(lead.id) ?? generatedMap.get(lead.id);
+    if (!emails) {
+      return res.status(500).json({ error: `Missing outreach emails for lead ${lead.id}` });
+    }
+
+    rows.push({
+      lead_id: lead.id,
+      offer_id: offerId,
+      name: lead.name,
+      email: lead.email,
+      phone: lead.phone,
+      website: lead.website,
+      location_text: lead.location_text,
+      ...emails
+    });
+  }
 
   const generationInsert = await supabase
     .from("outreach_generations")
@@ -240,8 +311,8 @@ outreachRouter.post("/generate", async (req, res) => {
       campaign_id: source.campaignId,
       list_id: source.listId,
       offer_id: offerId,
-      generated_count: generated.length,
-      model_version: modelVersion,
+      generated_count: rows.length,
+      model_version: batchModelVersion,
       created_at: now
     })
     .select("id")
@@ -253,21 +324,21 @@ outreachRouter.post("/generate", async (req, res) => {
 
   const generationId = generationInsert.data.id;
 
-  const historyRows = generated.map(({ lead, emails }) => ({
+  const historyRows = rows.map((row) => ({
     generation_id: generationId,
-    lead_id: lead.id,
+    lead_id: row.lead_id,
     offer_id: offerId,
-    name: lead.name,
-    email: lead.email,
-    phone: lead.phone,
-    website: lead.website,
-    location_text: lead.location_text,
-    opener_subject: emails.opener_subject,
-    opener_body: emails.opener_body,
-    followup1_subject: emails.followup1_subject,
-    followup1_body: emails.followup1_body,
-    followup2_subject: emails.followup2_subject,
-    followup2_body: emails.followup2_body,
+    name: row.name,
+    email: row.email,
+    phone: row.phone,
+    website: row.website,
+    location_text: row.location_text,
+    opener_subject: row.opener_subject,
+    opener_body: row.opener_body,
+    followup1_subject: row.followup1_subject,
+    followup1_body: row.followup1_body,
+    followup2_subject: row.followup2_subject,
+    followup2_body: row.followup2_body,
     created_at: now
   }));
 
@@ -299,17 +370,6 @@ outreachRouter.post("/generate", async (req, res) => {
     return res.status(500).json({ error: upsertResult.error.message });
   }
 
-  const rows = generated.map(({ lead, emails }) => ({
-    lead_id: lead.id,
-    offer_id: offerId,
-    name: lead.name,
-    email: lead.email,
-    phone: lead.phone,
-    website: lead.website,
-    location_text: lead.location_text,
-    ...emails
-  }));
-
   const [historySummary] = await listOutreachHistory({
     campaignId: source.campaignId ?? undefined,
     listId: source.listId ?? undefined,
@@ -319,6 +379,8 @@ outreachRouter.post("/generate", async (req, res) => {
 
   return res.json({
     generated: rows.length,
+    generatedNew: generated.length,
+    reusedExisting: existingRows.size,
     rows,
     history: historySummary ?? null
   });

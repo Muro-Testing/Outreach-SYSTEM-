@@ -4,6 +4,7 @@ import { supabase } from "../db.js";
 import { executeCollectionRun, buildQueryFingerprint } from "../services/collection.js";
 
 export const campaignsRouter = Router();
+const RUN_EVENT_LIMIT = 120;
 
 function resolveCampaignSubNiche(input: { subNiche?: string; nicheKeywords: string[] }) {
   const explicit = input.subNiche?.trim();
@@ -56,7 +57,7 @@ campaignsRouter.get("/:id/latest-run", async (req, res) => {
     .select("*")
     .eq("run_id", run.data.id)
     .order("created_at", { ascending: false })
-    .limit(20);
+    .limit(RUN_EVENT_LIMIT);
 
   if (errors.error) return res.status(500).json({ error: errors.error.message });
 

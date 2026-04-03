@@ -412,8 +412,17 @@ textarea { min-height: 90px; resize: vertical; }
 .run-card-top {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 0.6rem;
   margin-bottom: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.run-card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
 }
 
 .run-status-badge {
@@ -428,6 +437,15 @@ textarea { min-height: 90px; resize: vertical; }
 .run-status-running { background: #cce5ff; color: #004085; }
 .run-status-completed { background: #d4edda; color: #155724; }
 .run-status-failed  { background: #f8d7da; color: #721c24; }
+.run-status-stopped { background: #ece7f6; color: #4d2f7a; }
+
+.btn-stop-run {
+  border-color: #f5c2c7;
+  color: #9d1c28;
+}
+.btn-stop-run:hover {
+  background: #fde8ea;
+}
 
 .progress-wrap { margin: 0.5rem 0; }
 .progress-label { font-size: 0.82rem; color: var(--text-soft); margin-bottom: 0.3rem; }
@@ -454,7 +472,15 @@ textarea { min-height: 90px; resize: vertical; }
 .metric-val   { font-size: 1.2rem; font-weight: 800; color: var(--text-main); line-height: 1.2; }
 .metric-label { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
 
-.run-event-list { margin: 0.75rem 0 0; padding-left: 1rem; display: grid; gap: 0.25rem; }
+.run-event-list {
+  margin: 0.75rem 0 0;
+  padding-left: 1rem;
+  display: grid;
+  gap: 0.25rem;
+  max-height: 320px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .run-event { font-size: 0.88rem; }
 .run-event-info  { color: var(--text-soft); }
 .run-event-error { color: var(--red); }
