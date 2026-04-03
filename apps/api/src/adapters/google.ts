@@ -1,6 +1,4 @@
 import { env } from "../env.js";
-import { crawlWebsiteForContactData } from "../services/crawler.js";
-import { normalizeBusinessEmail } from "../services/email.js";
 import type { RawLead } from "../types.js";
 
 type SearchInput = {
@@ -8,10 +6,8 @@ type SearchInput = {
   subNiche: string;
   location: string;
   maxResults: number;
-  allKeywords?: string[];
   assertActive?: () => Promise<void>;
-  onKeywordStart?: (input: { keyword: string; index: number; total: number }) => Promise<void> | void;
-  onKeywordComplete?: (input: { keyword: string; index: number; total: number; resultCount: number }) => Promise<void> | void;
+  fetchDeadlineAt?: number;
   onPlaceProcessed?: (input: {
     keyword: string;
     index: number;
@@ -23,6 +19,16 @@ type SearchInput = {
 };
 
 const GOOGLE_FETCH_TIMEOUT_MS = 15000;
+
+export class GoogleKeywordFetchTimeoutError extends Error {
+  keyword: string;
+
+  constructor(keyword: string) {
+    super(`Google fetch timed out for keyword "${keyword}".`);
+    this.name = "GoogleKeywordFetchTimeoutError";
+    this.keyword = keyword;
+  }
+}
 
 type GoogleTextSearchResponse = {
   status?: string;
@@ -83,6 +89,13 @@ async function mapLimit<T, R>(items: T[], limit: number, mapper: (item: T, index
   return results;
 }
 
+async function assertFetchStageActive(input: SearchInput): Promise<void> {
+  await input.assertActive?.();
+  if (input.fetchDeadlineAt && Date.now() > input.fetchDeadlineAt) {
+    throw new GoogleKeywordFetchTimeoutError(input.niche);
+  }
+}
+
 async function fetchPlaceDetails(placeId: string): Promise<GooglePlaceDetailsResponse["result"]> {
   const fields = encodeURIComponent("website,url,formatted_phone_number,formatted_address,types");
   const endpoint =
@@ -99,23 +112,6 @@ async function fetchPlaceDetails(placeId: string): Promise<GooglePlaceDetailsRes
     throw new Error(`Google details error: ${data.status}${data.error_message ? ` - ${data.error_message}` : ""}`);
   }
   return data.result;
-}
-
-async function extractEmailFromWebsite(website?: string): Promise<string | undefined> {
-  if (!website) return undefined;
-
-  try {
-    const crawl = await crawlWebsiteForContactData(website, {
-      maxPages: 12,
-      maxDepth: 2,
-      timeoutMs: 12000
-    });
-
-    const email = normalizeBusinessEmail(crawl.emails[0] ?? "");
-    return email ?? undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function sleep(ms: number): Promise<void> {
@@ -223,6 +219,7 @@ async function fetchGoogleTextSearchResultsFrom(
   input: SearchInput,
   fetchPage: (input: SearchInput, pageToken?: string) => Promise<GoogleTextSearchResponse>
 ): Promise<NonNullable<GoogleTextSearchResponse["results"]>> {
+  await assertFetchStageActive(input);
   const maxResults = Math.max(1, Math.min(input.maxResults, 60));
   const merged: NonNullable<GoogleTextSearchResponse["results"]> = [];
 
@@ -230,8 +227,10 @@ async function fetchGoogleTextSearchResultsFrom(
   merged.push(...(page.results ?? []));
 
   while (merged.length < maxResults && page.next_page_token) {
+    await assertFetchStageActive(input);
     let nextPage: GoogleTextSearchResponse | null = null;
     for (let attempt = 0; attempt < 4; attempt += 1) {
+      await assertFetchStageActive(input);
       await sleep(1800 + attempt * 400);
       const candidate = await fetchPage(input, page.next_page_token);
       if (candidate.status !== "INVALID_REQUEST") {
@@ -273,11 +272,11 @@ export async function fetchGoogleLeadsForKeyword(input: SearchInput): Promise<Ra
     throw new Error("GOOGLE_MAPS_API_KEY is missing.");
   }
 
-  await input.assertActive?.();
+  await assertFetchStageActive(input);
   const results = await fetchGoogleTextSearchResults(input);
 
   const leads = await mapLimit(results, 8, async (item, itemIndex) => {
-    await input.assertActive?.();
+    await assertFetchStageActive(input);
     const placeId = String(item.place_id ?? "");
     let details: GooglePlaceDetailsResponse["result"] | undefined;
 
@@ -290,15 +289,13 @@ export async function fetchGoogleLeadsForKeyword(input: SearchInput): Promise<Ra
     }
 
     const website = String(details?.website ?? "");
-    const email = await extractEmailFromWebsite(website);
 
     await input.onPlaceProcessed?.({
       keyword: input.niche,
       index: itemIndex + 1,
       total: results.length,
       name: String(item.name ?? "Unknown business"),
-      website: website || undefined,
-      email
+      website: website || undefined
     });
 
     return {
@@ -309,7 +306,7 @@ export async function fetchGoogleLeadsForKeyword(input: SearchInput): Promise<Ra
         ? `https://www.google.com/maps/place/?q=place_id:${placeId}`
         : undefined,
       name: String(item.name ?? "Unknown business"),
-      email,
+      email: undefined,
       phone: String(details?.formatted_phone_number ?? ""),
       website,
       description: String(details?.types ? details.types.join(", ") : item.types ? item.types.join(", ") : "Local business"),
@@ -332,22 +329,14 @@ export async function fetchGoogleLeads(input: SearchInput & { allKeywords?: stri
   const keywords = input.allKeywords && input.allKeywords.length > 0
     ? input.allKeywords
     : [input.niche];
-
   const allLeads: RawLead[] = [];
 
-  for (let idx = 0; idx < keywords.length; idx += 1) {
-    const keyword = keywords[idx];
-    await input.assertActive?.();
-    await input.onKeywordStart?.({ keyword, index: idx + 1, total: keywords.length });
-    const keywordInput: SearchInput = { ...input, niche: keyword };
-    const leads = await fetchGoogleLeadsForKeyword(keywordInput);
-    allLeads.push(...leads);
-    await input.onKeywordComplete?.({
-      keyword,
-      index: idx + 1,
-      total: keywords.length,
-      resultCount: leads.length
+  for (const keyword of keywords) {
+    const leads = await fetchGoogleLeadsForKeyword({
+      ...input,
+      niche: keyword
     });
+    allLeads.push(...leads);
   }
 
   return allLeads;

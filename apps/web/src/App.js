@@ -65,6 +65,7 @@ export function App() {
     const [outreachWebhookUrl, setOutreachWebhookUrl] = useState("");
     const [sendingOutreachWebhook, setSendingOutreachWebhook] = useState(false);
     const [outreachRunSummary, setOutreachRunSummary] = useState(null);
+    const [outreachProgress, setOutreachProgress] = useState(null);
     const [outreachHistory, setOutreachHistory] = useState([]);
     const [outreachHistoryLoaded, setOutreachHistoryLoaded] = useState(false);
     const [selectedOutreachHistoryId, setSelectedOutreachHistoryId] = useState("");
@@ -192,6 +193,7 @@ export function App() {
             setSelectedOutreachHistoryId(data.id);
             setOutreachRows(data.rows);
             setOutreachRunSummary(null);
+            setOutreachProgress(null);
             setSelectedOfferId(data.offer_id);
             if (data.source_type === "campaign") {
                 setOutreachSourceMode("campaign");
@@ -529,29 +531,83 @@ export function App() {
         setOutreachError("");
         setOutreachRows([]);
         setOutreachRunSummary(null);
+        setOutreachProgress(null);
         try {
-            const result = await api("/api/outreach/generate", {
-                method: "POST", body: JSON.stringify(payload)
+            const res = await fetch("/api/outreach/generate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
             });
-            setOutreachRows(result.rows);
-            setOutreachRunSummary({
-                generatedNew: result.generatedNew,
-                reusedExisting: result.reusedExisting,
-                total: result.generated
-            });
-            if (result.history) {
-                setSelectedOutreachHistoryId(result.history.id);
-                window.localStorage.setItem("outreach:last-history-id", result.history.id);
+            if (!res.ok || !res.body) {
+                const body = await res.json().catch(() => ({}));
+                throw new Error(body.error ?? `Request failed (${res.status})`);
             }
-            await loadOutreachHistory();
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done)
+                    break;
+                buffer += decoder.decode(value, { stream: true });
+                const parts = buffer.split("\n\n");
+                buffer = parts.pop() ?? "";
+                for (const part of parts) {
+                    if (!part.startsWith("data: "))
+                        continue;
+                    const evt = JSON.parse(part.slice(6));
+                    if (evt.type === "start") {
+                        setOutreachProgress({
+                            completed: 0,
+                            total: evt.total ?? 0,
+                            generatedNew: 0,
+                            reusedExisting: 0,
+                            failed: 0
+                        });
+                    }
+                    else if (evt.type === "progress") {
+                        setOutreachProgress({
+                            completed: evt.completed ?? 0,
+                            total: evt.total ?? 0,
+                            generatedNew: evt.generatedNew ?? 0,
+                            reusedExisting: evt.reusedExisting ?? 0,
+                            failed: evt.failed ?? 0
+                        });
+                    }
+                    else if (evt.type === "row" && evt.row) {
+                        setOutreachRows((prev) => {
+                            const withoutCurrent = prev.filter((row) => row.lead_id !== evt.row.lead_id);
+                            return [...withoutCurrent, evt.row];
+                        });
+                    }
+                    else if (evt.type === "done") {
+                        setOutreachRows(evt.rows ?? []);
+                        setOutreachRunSummary({
+                            generatedNew: evt.generatedNew ?? 0,
+                            reusedExisting: evt.reusedExisting ?? 0,
+                            total: evt.generated ?? 0
+                        });
+                        setOutreachProgress({
+                            completed: evt.generated ?? 0,
+                            total: evt.generated ?? 0,
+                            generatedNew: evt.generatedNew ?? 0,
+                            reusedExisting: evt.reusedExisting ?? 0,
+                            failed: evt.failed ?? 0
+                        });
+                        if (evt.history) {
+                            setSelectedOutreachHistoryId(evt.history.id);
+                            window.localStorage.setItem("outreach:last-history-id", evt.history.id);
+                        }
+                        await loadOutreachHistory();
+                    }
+                    else if (evt.type === "error") {
+                        throw new Error(evt.error ?? "Generation failed");
+                    }
+                }
+            }
         }
         catch (err) {
-            if (err instanceof Error && "status" in err && err.status === 504) {
-                setOutreachError("Outreach generation timed out at the gateway. Try the Medium or Small model, or generate against a smaller lead set.");
-            }
-            else {
-                setOutreachError(err instanceof Error ? err.message : "Generation failed");
-            }
+            setOutreachError(err instanceof Error ? err.message : "Generation failed");
         }
         finally {
             setGeneratingOutreach(false);
@@ -820,7 +876,7 @@ export function App() {
                                                     setSelectedOutreachHistoryId(nextId);
                                                     if (nextId)
                                                         void loadOutreachHistoryEntry(nextId);
-                                                }, children: [_jsx("option", { value: "", children: "Choose saved outreach history" }), orderedOutreachHistory.map((entry) => (_jsx("option", { value: entry.id, children: formatHistoryLabel(entry) }, entry.id)))] }), _jsx("button", { type: "button", className: "btn-ghost", onClick: () => void loadOutreachHistory(), disabled: loadingOutreachHistory, children: loadingOutreachHistory ? "Loading..." : "Refresh history" })] }), outreachHistory.length === 0 && (_jsx("div", { className: "history-empty", children: "No saved outreach history yet. Your first generation will appear here automatically." })), selectedOutreachHistoryId && (_jsx("div", { className: "refine-panel", children: !refineOpen ? (_jsx("button", { type: "button", className: "btn-ghost", onClick: () => { setRefineOpen(true); setRefineError(""); }, disabled: refining, children: "Refine these emails" })) : (_jsxs("div", { className: "refine-form", children: [_jsx("textarea", { className: "refine-instructions", rows: 2, placeholder: "Leave blank to auto-fix (em dashes, possessives, formatting), or describe extra changes...", value: refineInstructions, onChange: (e) => setRefineInstructions(e.target.value), disabled: refining }), refining && refineProgress && (_jsxs("div", { className: "refine-progress", children: [_jsx("div", { className: "refine-progress-bar", children: _jsx("div", { className: "refine-progress-fill", style: { width: `${Math.round((refineProgress.completed / refineProgress.total) * 100)}%` } }) }), _jsxs("span", { className: "refine-progress-label", children: [refineProgress.completed, " / ", refineProgress.total, " refined"] })] })), _jsxs("div", { className: "refine-actions", children: [_jsx("button", { type: "button", className: "btn-generate", onClick: () => void onRefineOutreach(), disabled: refining, children: refining ? _jsxs(_Fragment, { children: [_jsx("span", { className: "spinner" }), " Refining..."] }) : "Run Refine" }), _jsx("button", { type: "button", className: "btn-ghost", onClick: () => { setRefineOpen(false); setRefineInstructions(""); setRefineError(""); }, disabled: refining, children: "Cancel" })] }), refineError && _jsx("div", { className: "outreach-error", children: refineError })] })) }))] }), outreachSourceMode === "list" && outreachLists.length > 0 && (_jsx("div", { className: "outreach-lists-row", children: outreachLists.map(list => (_jsxs("div", { className: "outreach-list-chip", children: [_jsx("span", { children: list.name }), _jsx("span", { className: "outreach-list-chip-count", children: list.lead_count }), _jsx("button", { type: "button", onClick: () => void onDeleteList(list.id), title: "Remove list", children: "x" })] }, list.id))) })), outreachSourceMode === "list" && outreachLists.length === 0 && !generatingOutreach && (_jsxs("div", { className: "empty-state", style: { padding: "1.5rem" }, children: [_jsx("div", { className: "empty-icon", children: "+" }), _jsxs("p", { children: ["No outreach lists yet. Go to ", _jsx("strong", { children: "All Leads" }), " above, check some leads, and click ", _jsx("strong", { children: "Add to Outreach List" }), "."] })] })), (outreachCampaign || outreachList || selectedOffer) && (_jsxs("div", { className: "outreach-summary-row", children: [outreachSourceMode === "campaign" && outreachCampaign && (_jsxs("span", { className: "outreach-tag outreach-tag-blue", children: ["List: ", outreachCampaign.sub_niche, " - ", outreachCampaign.location_scope] })), outreachSourceMode === "list" && outreachList && (_jsxs("span", { className: "outreach-tag outreach-tag-blue", children: ["List: ", outreachList.name, " (", outreachList.lead_count, " leads)"] })), selectedOffer && _jsxs("span", { className: "outreach-tag outreach-tag-purple", children: ["Offer: ", selectedOffer.offer_name] }), selectedOutreachHistory && _jsxs("span", { className: "outreach-tag outreach-tag-green", children: ["History rows: ", selectedOutreachHistory.generated_count] })] })), generatingOutreach && (_jsxs("div", { className: "generating-banner", children: [_jsx("span", { className: "spinner spinner-lg" }), _jsxs("div", { children: [_jsx("strong", { children: "Generating personalised emails..." }), _jsx("p", { children: "Writing opener + 2 follow-ups for each lead using the selected model. This may take longer for Large and bigger lists." })] })] })), outreachError && _jsx("p", { className: "error", style: { marginTop: "0.75rem" }, children: outreachError }), outreachRows.length > 0 && (_jsxs(_Fragment, { children: [_jsxs("div", { className: "results-banner", children: [_jsx("span", { className: "results-count", children: outreachRows.length }), "leads with personalised emails ready.", _jsx("span", { className: "results-hint", children: "Click any row to preview all 3 emails." })] }), outreachRunSummary && (_jsxs("p", { className: "run-hint", style: { marginTop: "0.75rem" }, children: [outreachRunSummary.generatedNew > 0
+                                                }, children: [_jsx("option", { value: "", children: "Choose saved outreach history" }), orderedOutreachHistory.map((entry) => (_jsx("option", { value: entry.id, children: formatHistoryLabel(entry) }, entry.id)))] }), _jsx("button", { type: "button", className: "btn-ghost", onClick: () => void loadOutreachHistory(), disabled: loadingOutreachHistory, children: loadingOutreachHistory ? "Loading..." : "Refresh history" })] }), outreachHistory.length === 0 && (_jsx("div", { className: "history-empty", children: "No saved outreach history yet. Your first generation will appear here automatically." })), selectedOutreachHistoryId && (_jsx("div", { className: "refine-panel", children: !refineOpen ? (_jsx("button", { type: "button", className: "btn-ghost", onClick: () => { setRefineOpen(true); setRefineError(""); }, disabled: refining, children: "Refine these emails" })) : (_jsxs("div", { className: "refine-form", children: [_jsx("textarea", { className: "refine-instructions", rows: 2, placeholder: "Leave blank to auto-fix (em dashes, possessives, formatting), or describe extra changes...", value: refineInstructions, onChange: (e) => setRefineInstructions(e.target.value), disabled: refining }), refining && refineProgress && (_jsxs("div", { className: "refine-progress", children: [_jsx("div", { className: "refine-progress-bar", children: _jsx("div", { className: "refine-progress-fill", style: { width: `${Math.round((refineProgress.completed / refineProgress.total) * 100)}%` } }) }), _jsxs("span", { className: "refine-progress-label", children: [refineProgress.completed, " / ", refineProgress.total, " refined"] })] })), _jsxs("div", { className: "refine-actions", children: [_jsx("button", { type: "button", className: "btn-generate", onClick: () => void onRefineOutreach(), disabled: refining, children: refining ? _jsxs(_Fragment, { children: [_jsx("span", { className: "spinner" }), " Refining..."] }) : "Run Refine" }), _jsx("button", { type: "button", className: "btn-ghost", onClick: () => { setRefineOpen(false); setRefineInstructions(""); setRefineError(""); }, disabled: refining, children: "Cancel" })] }), refineError && _jsx("div", { className: "outreach-error", children: refineError })] })) }))] }), outreachSourceMode === "list" && outreachLists.length > 0 && (_jsx("div", { className: "outreach-lists-row", children: outreachLists.map(list => (_jsxs("div", { className: "outreach-list-chip", children: [_jsx("span", { children: list.name }), _jsx("span", { className: "outreach-list-chip-count", children: list.lead_count }), _jsx("button", { type: "button", onClick: () => void onDeleteList(list.id), title: "Remove list", children: "x" })] }, list.id))) })), outreachSourceMode === "list" && outreachLists.length === 0 && !generatingOutreach && (_jsxs("div", { className: "empty-state", style: { padding: "1.5rem" }, children: [_jsx("div", { className: "empty-icon", children: "+" }), _jsxs("p", { children: ["No outreach lists yet. Go to ", _jsx("strong", { children: "All Leads" }), " above, check some leads, and click ", _jsx("strong", { children: "Add to Outreach List" }), "."] })] })), (outreachCampaign || outreachList || selectedOffer) && (_jsxs("div", { className: "outreach-summary-row", children: [outreachSourceMode === "campaign" && outreachCampaign && (_jsxs("span", { className: "outreach-tag outreach-tag-blue", children: ["List: ", outreachCampaign.sub_niche, " - ", outreachCampaign.location_scope] })), outreachSourceMode === "list" && outreachList && (_jsxs("span", { className: "outreach-tag outreach-tag-blue", children: ["List: ", outreachList.name, " (", outreachList.lead_count, " leads)"] })), selectedOffer && _jsxs("span", { className: "outreach-tag outreach-tag-purple", children: ["Offer: ", selectedOffer.offer_name] }), selectedOutreachHistory && _jsxs("span", { className: "outreach-tag outreach-tag-green", children: ["History rows: ", selectedOutreachHistory.generated_count] })] })), generatingOutreach && (_jsxs("div", { className: "generating-banner", children: [_jsx("span", { className: "spinner spinner-lg" }), _jsxs("div", { children: [_jsx("strong", { children: "Generating personalised emails..." }), _jsx("p", { children: "Writing opener + 2 follow-ups for each lead using the selected model. This may take longer for Large and bigger lists." }), outreachProgress && (_jsxs("div", { className: "generation-progress", children: [_jsx("div", { className: "refine-progress-bar", children: _jsx("div", { className: "refine-progress-fill", style: { width: `${outreachProgress.total ? Math.round((outreachProgress.completed / outreachProgress.total) * 100) : 0}%` } }) }), _jsxs("div", { className: "generation-progress-meta", children: [_jsxs("span", { children: [outreachProgress.completed, " / ", outreachProgress.total, " processed"] }), _jsxs("span", { children: [outreachProgress.generatedNew, " new"] }), _jsxs("span", { children: [outreachProgress.reusedExisting, " reused"] }), _jsxs("span", { children: [outreachProgress.failed, " failed"] })] })] }))] })] })), outreachError && _jsx("p", { className: "error", style: { marginTop: "0.75rem" }, children: outreachError }), outreachRows.length > 0 && (_jsxs(_Fragment, { children: [_jsxs("div", { className: "results-banner", children: [_jsx("span", { className: "results-count", children: outreachRows.length }), "leads with personalised emails ready.", _jsx("span", { className: "results-hint", children: "Click any row to preview all 3 emails." })] }), outreachRunSummary && (_jsxs("p", { className: "run-hint", style: { marginTop: "0.75rem" }, children: [outreachRunSummary.generatedNew > 0
                                                 ? `Generated ${outreachRunSummary.generatedNew} new lead${outreachRunSummary.generatedNew !== 1 ? "s" : ""}`
                                                 : "No new emails generated", outreachRunSummary.reusedExisting > 0
                                                 ? `, reused ${outreachRunSummary.reusedExisting} existing lead${outreachRunSummary.reusedExisting !== 1 ? "s" : ""} for this offer.`

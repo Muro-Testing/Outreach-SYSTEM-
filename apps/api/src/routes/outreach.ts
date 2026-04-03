@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { Response } from "express";
 import { z } from "zod";
 import * as XLSX from "xlsx";
 import { supabase } from "../db.js";
@@ -86,6 +87,61 @@ function mapRowsForResponse(rows: Record<string, unknown>[]) {
     followup2_subject: String(row.followup2_subject ?? ""),
     followup2_body: String(row.followup2_body ?? "")
   }));
+}
+
+function writeStreamEvent(res: Response, event: Record<string, unknown>) {
+  res.write(`data: ${JSON.stringify(event)}\n\n`);
+}
+
+function buildOutreachRow(lead: LeadForOutreach, offerId: string, emails: GeneratedEmails) {
+  return {
+    lead_id: lead.id,
+    offer_id: offerId,
+    name: lead.name,
+    email: lead.email,
+    phone: lead.phone,
+    website: lead.website,
+    location_text: lead.location_text,
+    ...emails
+  };
+}
+
+async function insertOutreachHistoryRow(generationId: string, row: ReturnType<typeof buildOutreachRow>, createdAt: string) {
+  return supabase.from("outreach_generation_rows").insert({
+    generation_id: generationId,
+    lead_id: row.lead_id,
+    offer_id: row.offer_id,
+    name: row.name,
+    email: row.email,
+    phone: row.phone,
+    website: row.website,
+    location_text: row.location_text,
+    opener_subject: row.opener_subject,
+    opener_body: row.opener_body,
+    followup1_subject: row.followup1_subject,
+    followup1_body: row.followup1_body,
+    followup2_subject: row.followup2_subject,
+    followup2_body: row.followup2_body,
+    created_at: createdAt
+  });
+}
+
+async function upsertLeadOutreachRow(row: ReturnType<typeof buildOutreachRow>, modelVersion: string, timestamp: string) {
+  return supabase
+    .from("lead_outreach")
+    .upsert({
+      lead_id: row.lead_id,
+      offer_id: row.offer_id,
+      opener_subject: row.opener_subject,
+      opener_body: row.opener_body,
+      followup1_subject: row.followup1_subject,
+      followup1_body: row.followup1_body,
+      followup2_subject: row.followup2_subject,
+      followup2_body: row.followup2_body,
+      model_version: modelVersion,
+      generated_at: timestamp,
+      updated_at: timestamp
+    }, { onConflict: "lead_id,offer_id" });
 }
 
 function buildCsvBuffer(rows: string[][]): Buffer {
@@ -263,7 +319,7 @@ outreachRouter.post("/generate", async (req, res) => {
   }
 
   if (leads.length === 0) {
-    return res.json({ generated: 0, generatedNew: 0, reusedExisting: 0, rows: [], history: null });
+    return res.json({ generated: 0, generatedNew: 0, reusedExisting: 0, failed: 0, rows: [], history: null });
   }
 
   let existingRows: Map<string, GeneratedEmails>;
@@ -273,36 +329,13 @@ outreachRouter.post("/generate", async (req, res) => {
     return res.status(500).json({ error: error instanceof Error ? error.message : "Failed to load cached outreach rows" });
   }
 
-  const leadsToGenerate = leads.filter((lead) => !existingRows.has(lead.id));
-  const generated = leadsToGenerate.length > 0
-    ? await generateEmailsForLeads(leadsToGenerate, offer, { modelChoice: model })
-    : [];
-  const generatedMap = new Map(generated.map((entry) => [entry.lead.id, entry.emails] as const));
   const now = new Date().toISOString();
-  const batchModelVersion = generated.length === 0
+  const leadsToGenerate = leads.filter((lead) => !existingRows.has(lead.id));
+  const batchModelVersion = leadsToGenerate.length === 0
     ? `cached:${modelVersion}`
     : existingRows.size > 0
       ? `${modelVersion}+cache`
       : modelVersion;
-
-  const rows = [];
-  for (const lead of leads) {
-    const emails = existingRows.get(lead.id) ?? generatedMap.get(lead.id);
-    if (!emails) {
-      return res.status(500).json({ error: `Missing outreach emails for lead ${lead.id}` });
-    }
-
-    rows.push({
-      lead_id: lead.id,
-      offer_id: offerId,
-      name: lead.name,
-      email: lead.email,
-      phone: lead.phone,
-      website: lead.website,
-      location_text: lead.location_text,
-      ...emails
-    });
-  }
 
   const generationInsert = await supabase
     .from("outreach_generations")
@@ -311,7 +344,7 @@ outreachRouter.post("/generate", async (req, res) => {
       campaign_id: source.campaignId,
       list_id: source.listId,
       offer_id: offerId,
-      generated_count: rows.length,
+      generated_count: 0,
       model_version: batchModelVersion,
       created_at: now
     })
@@ -324,66 +357,114 @@ outreachRouter.post("/generate", async (req, res) => {
 
   const generationId = generationInsert.data.id;
 
-  const historyRows = rows.map((row) => ({
-    generation_id: generationId,
-    lead_id: row.lead_id,
-    offer_id: offerId,
-    name: row.name,
-    email: row.email,
-    phone: row.phone,
-    website: row.website,
-    location_text: row.location_text,
-    opener_subject: row.opener_subject,
-    opener_body: row.opener_body,
-    followup1_subject: row.followup1_subject,
-    followup1_body: row.followup1_body,
-    followup2_subject: row.followup2_subject,
-    followup2_body: row.followup2_body,
-    created_at: now
-  }));
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
 
-  const historyInsert = await supabase.from("outreach_generation_rows").insert(historyRows);
-  if (historyInsert.error) {
-    await supabase.from("outreach_generations").delete().eq("id", generationId);
-    return res.status(500).json({ error: historyInsert.error.message });
-  }
+  const rows: Array<ReturnType<typeof buildOutreachRow>> = [];
+  let completed = 0;
+  let generatedNewCount = 0;
+  let reusedExistingCount = 0;
+  let failedCount = 0;
 
-  const upsertRows = generated.map(({ lead, emails }) => ({
-    lead_id: lead.id,
-    offer_id: offerId,
-    opener_subject: emails.opener_subject,
-    opener_body: emails.opener_body,
-    followup1_subject: emails.followup1_subject,
-    followup1_body: emails.followup1_body,
-    followup2_subject: emails.followup2_subject,
-    followup2_body: emails.followup2_body,
-    model_version: modelVersion,
-    generated_at: now,
-    updated_at: now
-  }));
-
-  const upsertResult = await supabase
-    .from("lead_outreach")
-    .upsert(upsertRows, { onConflict: "lead_id,offer_id" });
-
-  if (upsertResult.error) {
-    return res.status(500).json({ error: upsertResult.error.message });
-  }
-
-  const [historySummary] = await listOutreachHistory({
-    campaignId: source.campaignId ?? undefined,
-    listId: source.listId ?? undefined,
-    offerId,
-    limit: 1
+  const emitProgress = () => writeStreamEvent(res, {
+    type: "progress",
+    completed,
+    total: leads.length,
+    generatedNew: generatedNewCount,
+    reusedExisting: reusedExistingCount,
+    failed: failedCount
   });
 
-  return res.json({
-    generated: rows.length,
-    generatedNew: generated.length,
-    reusedExisting: existingRows.size,
-    rows,
-    history: historySummary ?? null
+  writeStreamEvent(res, {
+    type: "start",
+    total: leads.length,
+    generatedNew: 0,
+    reusedExisting: 0,
+    failed: 0
   });
+
+  try {
+    for (const lead of leads) {
+      const cachedEmails = existingRows.get(lead.id);
+      if (!cachedEmails) continue;
+
+      const row = buildOutreachRow(lead, offerId, cachedEmails);
+      const historyInsert = await insertOutreachHistoryRow(generationId, row, now);
+      if (historyInsert.error) {
+        failedCount += 1;
+        writeStreamEvent(res, { type: "row-error", leadId: lead.id, error: historyInsert.error.message });
+        completed += 1;
+        emitProgress();
+        continue;
+      }
+
+      rows.push(row);
+      completed += 1;
+      reusedExistingCount += 1;
+      writeStreamEvent(res, { type: "row", row, mode: "reused" });
+      emitProgress();
+    }
+
+    if (leadsToGenerate.length > 0) {
+      await generateEmailsForLeads(leadsToGenerate, offer, {
+        modelChoice: model,
+        onLeadComplete: async ({ lead, emails }) => {
+          const row = buildOutreachRow(lead, offerId, emails);
+          const historyInsert = await insertOutreachHistoryRow(generationId, row, now);
+          if (historyInsert.error) {
+            failedCount += 1;
+            writeStreamEvent(res, { type: "row-error", leadId: lead.id, error: historyInsert.error.message });
+            completed += 1;
+            emitProgress();
+            return;
+          }
+
+          const upsertResult = await upsertLeadOutreachRow(row, modelVersion, now);
+          if (upsertResult.error) {
+            failedCount += 1;
+            writeStreamEvent(res, { type: "row-error", leadId: lead.id, error: upsertResult.error.message });
+            completed += 1;
+            emitProgress();
+            return;
+          }
+
+          rows.push(row);
+          completed += 1;
+          generatedNewCount += 1;
+          writeStreamEvent(res, { type: "row", row, mode: "generated" });
+          emitProgress();
+        }
+      });
+    }
+
+    await supabase
+      .from("outreach_generations")
+      .update({ generated_count: rows.length })
+      .eq("id", generationId);
+
+    const [historySummary] = await listOutreachHistory({
+      campaignId: source.campaignId ?? undefined,
+      listId: source.listId ?? undefined,
+      offerId,
+      limit: 1
+    });
+
+    writeStreamEvent(res, {
+      type: "done",
+      generated: rows.length,
+      generatedNew: generatedNewCount,
+      reusedExisting: reusedExistingCount,
+      failed: failedCount,
+      rows,
+      history: historySummary ?? null
+    });
+    return res.end();
+  } catch (error) {
+    writeStreamEvent(res, { type: "error", error: error instanceof Error ? error.message : "Generation failed" });
+    return res.end();
+  }
 });
 
 outreachRouter.post("/export-webhook", async (req, res) => {

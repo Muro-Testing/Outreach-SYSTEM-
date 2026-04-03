@@ -1140,6 +1140,21 @@ tbody tr.row-selected .lead-name-col {
   max-width: none;
 }
 
+.generation-progress {
+  margin-top: 0.75rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.generation-progress-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  font-size: 0.78rem;
+  color: var(--text-soft);
+  font-weight: 700;
+}
+
 .outreach-row { cursor: pointer; }
 .outreach-row:hover { background: #f0fff4; }
 

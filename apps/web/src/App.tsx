@@ -46,6 +46,7 @@ type ModalEmail = {
 type OutreachModelOption = "default" | "large" | "medium" | "small";
 type OutreachExportFormat = "csv" | "xlsx";
 type OutreachRunSummary = { generatedNew: number; reusedExisting: number; total: number };
+type OutreachGenerationProgress = { completed: number; total: number; generatedNew: number; reusedExisting: number; failed: number };
 type KeywordMatch = { keyword: string; resultsCount: number; searchedAt: string; runId: string; campaignId: string };
 type DuplicateWarning =
   | { duplicateType: "campaign"; existingRunId: string; existingCampaignId: string; leadCount: number; completedAt: string }
@@ -123,6 +124,7 @@ export function App() {
   const [outreachWebhookUrl, setOutreachWebhookUrl] = useState("");
   const [sendingOutreachWebhook, setSendingOutreachWebhook] = useState(false);
   const [outreachRunSummary, setOutreachRunSummary] = useState<OutreachRunSummary | null>(null);
+  const [outreachProgress, setOutreachProgress] = useState<OutreachGenerationProgress | null>(null);
   const [outreachHistory, setOutreachHistory] = useState<OutreachHistorySummary[]>([]);
   const [outreachHistoryLoaded, setOutreachHistoryLoaded] = useState(false);
   const [selectedOutreachHistoryId, setSelectedOutreachHistoryId] = useState("");
@@ -249,6 +251,7 @@ export function App() {
       setSelectedOutreachHistoryId(data.id);
       setOutreachRows(data.rows);
       setOutreachRunSummary(null);
+      setOutreachProgress(null);
       setSelectedOfferId(data.offer_id);
       if (data.source_type === "campaign") {
         setOutreachSourceMode("campaign");
@@ -520,31 +523,92 @@ export function App() {
     const payload = outreachSourceMode === "campaign"
       ? { campaignId: outreachCampaignId, offerId: selectedOfferId, model: outreachModel }
       : { listId: outreachListId, offerId: selectedOfferId, model: outreachModel };
-    setGeneratingOutreach(true); setOutreachError(""); setOutreachRows([]); setOutreachRunSummary(null);
+    setGeneratingOutreach(true); setOutreachError(""); setOutreachRows([]); setOutreachRunSummary(null); setOutreachProgress(null);
     try {
-      const result = await api<{
-        generated: number; generatedNew: number; reusedExisting: number;
-        rows: OutreachRow[]; history: OutreachHistorySummary | null
-      }>("/api/outreach/generate", {
-        method: "POST", body: JSON.stringify(payload)
+      const res = await fetch("/api/outreach/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
       });
-      setOutreachRows(result.rows);
-      setOutreachRunSummary({
-        generatedNew: result.generatedNew,
-        reusedExisting: result.reusedExisting,
-        total: result.generated
-      });
-      if (result.history) {
-        setSelectedOutreachHistoryId(result.history.id);
-        window.localStorage.setItem("outreach:last-history-id", result.history.id);
+      if (!res.ok || !res.body) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { error?: string }).error ?? `Request failed (${res.status})`);
       }
-      await loadOutreachHistory();
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+
+        for (const part of parts) {
+          if (!part.startsWith("data: ")) continue;
+          const evt = JSON.parse(part.slice(6)) as {
+            type: string;
+            completed?: number;
+            total?: number;
+            generated?: number;
+            generatedNew?: number;
+            reusedExisting?: number;
+            failed?: number;
+            row?: OutreachRow;
+            rows?: OutreachRow[];
+            history?: OutreachHistorySummary | null;
+            error?: string;
+          };
+
+          if (evt.type === "start") {
+            setOutreachProgress({
+              completed: 0,
+              total: evt.total ?? 0,
+              generatedNew: 0,
+              reusedExisting: 0,
+              failed: 0
+            });
+          } else if (evt.type === "progress") {
+            setOutreachProgress({
+              completed: evt.completed ?? 0,
+              total: evt.total ?? 0,
+              generatedNew: evt.generatedNew ?? 0,
+              reusedExisting: evt.reusedExisting ?? 0,
+              failed: evt.failed ?? 0
+            });
+          } else if (evt.type === "row" && evt.row) {
+            setOutreachRows((prev) => {
+              const withoutCurrent = prev.filter((row) => row.lead_id !== evt.row!.lead_id);
+              return [...withoutCurrent, evt.row!];
+            });
+          } else if (evt.type === "done") {
+            setOutreachRows(evt.rows ?? []);
+            setOutreachRunSummary({
+              generatedNew: evt.generatedNew ?? 0,
+              reusedExisting: evt.reusedExisting ?? 0,
+              total: evt.generated ?? 0
+            });
+            setOutreachProgress({
+              completed: evt.generated ?? 0,
+              total: evt.generated ?? 0,
+              generatedNew: evt.generatedNew ?? 0,
+              reusedExisting: evt.reusedExisting ?? 0,
+              failed: evt.failed ?? 0
+            });
+            if (evt.history) {
+              setSelectedOutreachHistoryId(evt.history.id);
+              window.localStorage.setItem("outreach:last-history-id", evt.history.id);
+            }
+            await loadOutreachHistory();
+          } else if (evt.type === "error") {
+            throw new Error(evt.error ?? "Generation failed");
+          }
+        }
+      }
     } catch (err) {
-      if (err instanceof Error && "status" in err && (err as Error & { status?: number }).status === 504) {
-        setOutreachError("Outreach generation timed out at the gateway. Try the Medium or Small model, or generate against a smaller lead set.");
-      } else {
-        setOutreachError(err instanceof Error ? err.message : "Generation failed");
-      }
+      setOutreachError(err instanceof Error ? err.message : "Generation failed");
     }
     finally { setGeneratingOutreach(false); }
   }
@@ -1548,6 +1612,22 @@ export function App() {
               <div>
                 <strong>Generating personalised emails...</strong>
                 <p>Writing opener + 2 follow-ups for each lead using the selected model. This may take longer for Large and bigger lists.</p>
+                {outreachProgress && (
+                  <div className="generation-progress">
+                    <div className="refine-progress-bar">
+                      <div
+                        className="refine-progress-fill"
+                        style={{ width: `${outreachProgress.total ? Math.round((outreachProgress.completed / outreachProgress.total) * 100) : 0}%` }}
+                      />
+                    </div>
+                    <div className="generation-progress-meta">
+                      <span>{outreachProgress.completed} / {outreachProgress.total} processed</span>
+                      <span>{outreachProgress.generatedNew} new</span>
+                      <span>{outreachProgress.reusedExisting} reused</span>
+                      <span>{outreachProgress.failed} failed</span>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

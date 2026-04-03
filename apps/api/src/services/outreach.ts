@@ -36,6 +36,7 @@ type GenerateLeadOptions = {
 
 type GenerateLeadBatchOptions = GenerateLeadOptions & {
   concurrency?: number;
+  onLeadComplete?: (input: { lead: LeadForOutreach; emails: GeneratedEmails; completed: number; total: number }) => Promise<void> | void;
 };
 
 function resolveOutreachModel(modelChoice?: OutreachModelChoice): string {
@@ -438,18 +439,36 @@ export async function generateEmailsForLeads(
 ): Promise<Array<{ lead: LeadForOutreach; emails: GeneratedEmails }>> {
   const results: Array<{ lead: LeadForOutreach; emails: GeneratedEmails }> = [];
   const concurrency = options.concurrency ?? resolveOutreachConcurrency(options.modelChoice);
+  let cursor = 0;
+  let completed = 0;
 
-  for (let i = 0; i < leads.length; i += concurrency) {
-    const batch = leads.slice(i, i + concurrency);
-    const settled = await Promise.allSettled(batch.map((lead) => generateEmailsForLead(lead, offer, options)));
-    for (let j = 0; j < batch.length; j += 1) {
-      const result = settled[j];
-      results.push({
-        lead: batch[j],
-        emails: result.status === "fulfilled" ? result.value : fallbackEmails(batch[j], offer)
+  async function worker() {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= leads.length) return;
+
+      const lead = leads[index];
+      let emails: GeneratedEmails;
+      try {
+        emails = await generateEmailsForLead(lead, offer, options);
+      } catch {
+        emails = fallbackEmails(lead, offer);
+      }
+
+      results.push({ lead, emails });
+      completed += 1;
+      await options.onLeadComplete?.({
+        lead,
+        emails,
+        completed,
+        total: leads.length
       });
     }
   }
+
+  const workers = Array.from({ length: Math.min(concurrency, leads.length) }, () => worker());
+  await Promise.all(workers);
 
   return results;
 }
