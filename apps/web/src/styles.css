@@ -1154,6 +1154,7 @@ tbody tr.row-selected .lead-name-col {
   justify-content: center;
   padding: 1rem;
   backdrop-filter: blur(2px);
+  overscroll-behavior: contain;
 }
 
 .modal {
@@ -1198,15 +1199,22 @@ tbody tr.row-selected .lead-name-col {
 
 .modal-body {
   overflow-y: auto;
+  flex: 1;
+  min-height: 0;
   padding: 1.25rem 1.5rem;
   display: grid;
+  align-content: start;
   gap: 1rem;
+  overscroll-behavior: contain;
 }
 
 .modal-email {
   border: 1px solid var(--line);
   border-radius: 14px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .modal-email-tag {
@@ -1231,8 +1239,12 @@ tbody tr.row-selected .lead-name-col {
   color: var(--text-soft);
   line-height: 1.65;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   padding: 0.75rem 1rem;
   background: var(--panel-bg-soft);
+  max-height: min(36vh, 360px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 /* ── Spinner ─────────────────────────────────────────────────────────────────── */
