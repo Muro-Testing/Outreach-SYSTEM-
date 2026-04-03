@@ -49,6 +49,11 @@ type EnrichmentJob = {
   crawlResult: CrawlResult | null;
 };
 
+type LeadProcessingFailure = {
+  raw: RawLead;
+  message: string;
+};
+
 const INFO_PREFIX = "[info]";
 
 class RunStoppedError extends Error {
@@ -279,12 +284,16 @@ async function upsertLead(
       .eq("website_domain", normalized.websiteDomain)
       .maybeSingle();
 
+    if (existing.error) {
+      throw new Error(`Lead lookup failed for domain ${normalized.websiteDomain}: ${existing.error.message}`);
+    }
+
     if (existing.data?.id) {
       counters.dedupedCount += 1;
       counters.updatedCount += 1;
       leadId = existing.data.id;
 
-      await supabase.from("leads").update({
+      const updated = await supabase.from("leads").update({
         email: normalizedEmail,
         name: normalized.name,
         what_they_do_summary: normalized.whatTheyDoSummary,
@@ -293,6 +302,10 @@ async function upsertLead(
         website: normalized.website,
         last_run_id: runId
       }).eq("id", leadId);
+
+      if (updated.error) {
+        throw new Error(`Lead update failed for ${normalized.name}: ${updated.error.message}`);
+      }
     }
   }
 
@@ -310,7 +323,7 @@ async function upsertLead(
     }).select("id").single();
 
     if (inserted.error || !inserted.data) {
-      return null;
+      throw new Error(inserted.error?.message ?? `Lead insert returned no row for ${normalized.name}`);
     }
 
     leadId = inserted.data.id;
@@ -319,7 +332,7 @@ async function upsertLead(
 
   if (!leadId) return null;
 
-  await supabase.from("lead_sources").insert({
+  const sourceInsert = await supabase.from("lead_sources").insert({
     lead_id: leadId,
     campaign_id: campaign.id,
     run_id: runId,
@@ -331,6 +344,10 @@ async function upsertLead(
     raw_payload: raw.raw
   });
 
+  if (sourceInsert.error) {
+    throw new Error(`Lead source insert failed for ${normalized.name}: ${sourceInsert.error.message}`);
+  }
+
   return {
     leadId,
     name: normalized.name,
@@ -339,6 +356,38 @@ async function upsertLead(
     whatTheyDoSummary: normalized.whatTheyDoSummary,
     crawlResult
   };
+}
+
+function formatLeadLabel(raw: RawLead): string {
+  const source = raw.sourceName ? `[${raw.sourceName}] ` : "";
+  const website = raw.website ? ` | ${raw.website.replace(/^https?:\/\//, "")}` : "";
+  return `${source}${raw.name}${website}`;
+}
+
+async function processRawLead(
+  runId: string,
+  campaign: CampaignRow,
+  raw: RawLead,
+  counters: RunCounters,
+  crawlCache: Map<string, Promise<CrawlResult>>,
+  runGuard: ReturnType<typeof createRunStopGuard>
+): Promise<{ job: EnrichmentJob | null; failure: LeadProcessingFailure | null }> {
+  await runGuard.assertActive();
+  await logRunEvent(runId, campaign.id, `Crawling ${formatLeadLabel(raw)}`);
+
+  try {
+    const job = await upsertLead(runId, campaign, raw, counters, crawlCache);
+    return { job, failure: null };
+  } catch (err) {
+    if (err instanceof RunStoppedError) {
+      throw err;
+    }
+
+    await logRunError(runId, campaign.id, raw.sourceName, err);
+    const message = err instanceof Error ? err.message : "Unknown lead processing failure";
+    await logRunEvent(runId, campaign.id, `Lead failed and was skipped: ${formatLeadLabel(raw)} | ${message}`);
+    return { job: null, failure: { raw, message } };
+  }
 }
 
 export async function executeCollectionRun(
@@ -510,27 +559,32 @@ export async function executeCollectionRun(
     const enrichmentJobsByLeadId = new Map<string, EnrichmentJob>();
     const crawlCache = new Map<string, Promise<CrawlResult>>();
     let processed = 0;
+    let failedLeadCount = 0;
     let uniqueVerifiedLeadCount = 0;
 
     await mapLimit(allRaw, CRAWL_CONCURRENCY, async (raw) => {
-      await runGuard.assertActive();
-      await logRunEvent(runId, campaign.id, `Crawling ${raw.name}${raw.website ? ` | ${raw.website.replace(/^https?:\/\//, "")}` : ""}`);
-      const job = await upsertLead(runId, campaign, raw, counters, crawlCache);
-      processed += 1;
+      try {
+        const { job, failure } = await processRawLead(runId, campaign, raw, counters, crawlCache, runGuard);
 
-      if (job && !enrichmentJobsByLeadId.has(job.leadId)) {
-        enrichmentJobsByLeadId.set(job.leadId, job);
-        uniqueVerifiedLeadCount += 1;
-        await logRunEvent(runId, campaign.id, `Verified email kept for ${job.name}: ${job.email}`);
-      } else if (!job) {
-        await logRunEvent(runId, campaign.id, `No verified email found for ${raw.name}`);
+        if (failure) {
+          failedLeadCount += 1;
+        } else if (job && !enrichmentJobsByLeadId.has(job.leadId)) {
+          enrichmentJobsByLeadId.set(job.leadId, job);
+          uniqueVerifiedLeadCount += 1;
+          await logRunEvent(runId, campaign.id, `Verified email kept for ${job.name}: ${job.email}`);
+        } else if (!job) {
+          await logRunEvent(runId, campaign.id, `No verified email found for ${raw.name}`);
+        }
+      } finally {
+        processed += 1;
       }
 
       if (processed % CRAWL_PROGRESS_INTERVAL === 0 || processed === allRaw.length) {
         await logRunEvent(
           runId,
           campaign.id,
-          `Progress: ${processed}/${allRaw.length} prospects crawled | ${uniqueVerifiedLeadCount} unique email-verified leads so far`
+          `Progress: ${processed}/${allRaw.length} prospects crawled | ` +
+            `${uniqueVerifiedLeadCount} unique email-verified leads | ${failedLeadCount} skipped due to errors`
         );
         await flushRunMetrics(runId, counters, "running");
       }
@@ -540,6 +594,7 @@ export async function executeCollectionRun(
       runId,
       campaign.id,
       `Crawl complete: ${uniqueVerifiedLeadCount} unique email-verified leads from ${counters.totalCandidates} candidates` +
+        ` | ${failedLeadCount} skipped due to errors` +
         (uniqueVerifiedLeadCount < targetEmails
           ? ` (target was ${targetEmails} - try more keywords or sources for next run)`
           : ` - target of ${targetEmails} reached`)
